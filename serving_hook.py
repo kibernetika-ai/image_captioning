@@ -131,7 +131,8 @@ def postprocess(outputs, ctx):
     font = get_font(w, h, caption)
     text_size = font.getsize(caption)
     text_x = (w - text_size[0]) // 2
-    text_xy = (text_x, h // 50)
+    text_y = (expanding - text_size[1]) // 2
+    text_xy = (text_x, text_y)
     draw.text(text_xy, caption, font=font, fill='black')
 
     image_bytes = io.BytesIO()
