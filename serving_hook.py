@@ -19,7 +19,6 @@ PARAMS = {
 }
 session = None
 model = None
-image_font = None
 
 
 def init_hook(**params):
@@ -31,7 +30,6 @@ def init_hook(**params):
     global session
     global model
     global vocabulary
-    global image_font
 
     vocabulary = dataset.Vocabulary(
         PARAMS['vocabulary-size'],
@@ -49,10 +47,10 @@ def init_hook(**params):
     session = sess
 
     try:
-        image_font = ImageFont.truetype('Roboto-Bold.ttf', 42)
+        ImageFont.truetype('Roboto-Bold.ttf', 42)
         print('Loaded Roboto-Bold.ttf.')
     except:
-        image_font = ImageFont.load_default()
+        ImageFont.load_default()
         print('Loaded default PIL font.')
 
 
@@ -90,6 +88,24 @@ def preprocess(inputs, ctx, **kwargs):
     return {'fake': 'fake'}
 
 
+def get_font(w, h, text):
+    try:
+        f = ImageFont.truetype('Roboto-Bold.ttf', 200)
+        size_found = False
+        padding = w // 20
+        size = 200
+        while not size_found:
+            x, _ = f.getsize(text)
+            if x <= w - padding * 2:
+                break
+            size -= 1
+            f = f.font_variant(size=size)
+        print('Set font size to %s.' % size)
+        return f
+    except:
+        return ImageFont.load_default()
+
+
 def postprocess(outputs, ctx):
     captions = []
     scores = []
@@ -104,16 +120,17 @@ def postprocess(outputs, ctx):
 
     w = ctx.image.size[0]
     h = ctx.image.size[1]
-    montage = Image.new(mode='RGBA', size=(w, h + 100), color='white')
+    expanding = h // 8
+    montage = Image.new(mode='RGBA', size=(w, h + expanding), color='white')
 
-    montage.paste(ctx.image, (0, 100))
+    montage.paste(ctx.image, (0, expanding))
     draw = ImageDraw.Draw(montage)
 
-    text_width = image_font.getsize(caption)
-    print(text_width)
-    text_x = (w - text_width[0]) // 2
-    text_xy = (text_x, 20)
-    draw.text(text_xy, caption, font=image_font, fill='black')
+    font = get_font(w, h, caption)
+    text_size = font.getsize(caption)
+    text_x = (w - text_size[0]) // 2
+    text_xy = (text_x, h // 50)
+    draw.text(text_xy, caption, font=font, fill='black')
 
     image_bytes = io.BytesIO()
     montage.save(image_bytes, format='PNG')
