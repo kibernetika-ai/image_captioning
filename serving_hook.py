@@ -90,10 +90,11 @@ def preprocess(inputs, ctx, **kwargs):
 
 def get_font(w, h, text):
     try:
-        f = ImageFont.truetype('Roboto-Bold.ttf', 200)
+        size = 300
+        f = ImageFont.truetype('Roboto-Bold.ttf', size)
         size_found = False
         padding = w // 20
-        size = 200
+
         while not size_found:
             x, _ = f.getsize(text)
             if x <= w - padding * 2:
