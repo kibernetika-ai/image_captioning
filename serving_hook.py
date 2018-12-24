@@ -94,10 +94,11 @@ def get_font(w, h, text):
         f = ImageFont.truetype('Roboto-Bold.ttf', size)
         size_found = False
         padding = w // 20
+        expanding = h // 8
 
         while not size_found:
-            x, _ = f.getsize(text)
-            if x <= w - padding * 2:
+            x, y = f.getsize(text)
+            if x <= w - padding * 2 and y <= expanding - h // 25:
                 break
             size -= 1
             f = f.font_variant(size=size)
