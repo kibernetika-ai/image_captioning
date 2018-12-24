@@ -26,7 +26,7 @@ class Config(object):
 
         # about the optimization
         self.num_epochs = 100
-        self.batch_size = 32
+        self.batch_size = 1
         self.optimizer = 'Adam'    # 'Adam', 'RMSProp', 'Momentum' or 'SGD'
         self.initial_learning_rate = 0.0001
         self.learning_rate_decay_factor = 1.0
@@ -46,7 +46,7 @@ class Config(object):
         self.summary_dir = './summary/'
 
         # about the vocabulary
-        self.vocabulary_file = './vocabulary.csv'
+        self.vocabulary_file = './models/vocabulary.csv'
         self.vocabulary_size = 5000
 
         # about the training

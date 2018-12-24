@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import matplotlib.pyplot as plt
-import cPickle as pickle
+
+import six.moves.cPickle as pickle
 import copy
 import json
 from tqdm import tqdm
@@ -153,19 +154,22 @@ class BaseModel(object):
     def beam_search(self, sess, image_files, vocabulary):
         """Use beam search to generate the captions for a batch of images."""
         # Feed in the images to get the contexts and the initial LSTM states
-        config = self.config
         images = self.image_loader.load_images(image_files)
+        return self.beam_search_images(sess, images, vocabulary)
+
+    def beam_search_images(self, sess, images, vocabulary):
+        config = self.config
         contexts, initial_memory, initial_output = sess.run(
             [self.conv_feats, self.initial_memory, self.initial_output],
-            feed_dict = {self.images: images})
+            feed_dict={self.images: images})
 
         partial_caption_data = []
         complete_caption_data = []
         for k in range(config.batch_size):
-            initial_beam = CaptionData(sentence = [],
-                                       memory = initial_memory[k],
-                                       output = initial_output[k],
-                                       score = 1.0)
+            initial_beam = CaptionData(sentence=[],
+                                       memory=initial_memory[k],
+                                       output=initial_output[k],
+                                       score=1.0)
             partial_caption_data.append(TopN(config.beam_size))
             partial_caption_data[-1].push(initial_beam)
             complete_caption_data.append(TopN(config.beam_size))
@@ -184,29 +188,29 @@ class BaseModel(object):
                     last_word = np.zeros((config.batch_size), np.int32)
                 else:
                     last_word = np.array([pcl[b].sentence[-1]
-                                        for pcl in partial_caption_data_lists],
-                                        np.int32)
+                                          for pcl in partial_caption_data_lists],
+                                         np.int32)
 
                 last_memory = np.array([pcl[b].memory
                                         for pcl in partial_caption_data_lists],
-                                        np.float32)
+                                       np.float32)
                 last_output = np.array([pcl[b].output
                                         for pcl in partial_caption_data_lists],
-                                        np.float32)
+                                       np.float32)
 
                 memory, output, scores = sess.run(
                     [self.memory, self.output, self.probs],
-                    feed_dict = {self.contexts: contexts,
-                                 self.last_word: last_word,
-                                 self.last_memory: last_memory,
-                                 self.last_output: last_output})
+                    feed_dict={self.contexts: contexts,
+                               self.last_word: last_word,
+                               self.last_memory: last_memory,
+                               self.last_output: last_output})
 
                 # Find the beam_size most probable next words
                 for k in range(config.batch_size):
                     caption_data = partial_caption_data_lists[k][b]
                     words_and_scores = list(enumerate(scores[k]))
                     words_and_scores.sort(key=lambda x: -x[1])
-                    words_and_scores = words_and_scores[0:config.beam_size+1]
+                    words_and_scores = words_and_scores[0:config.beam_size + 1]
 
                     # Append each of these words to the current partial caption
                     for w, s in words_and_scores:
@@ -259,7 +263,7 @@ class BaseModel(object):
                                      str(global_step)+".npy")
 
         print("Loading the model from %s..." %save_path)
-        data_dict = np.load(save_path).item()
+        data_dict = np.load(save_path, encoding='latin1').item()
         count = 0
         for v in tqdm(tf.global_variables()):
             if v.name in data_dict.keys():
