@@ -174,21 +174,21 @@ def get_caption_output(ctx):
         return {}
 
     captions = []
-    scores = []
+    # scores = []
 
     caption_data = caption_generator.beam_search_images(
         session, [ctx.np_image], vocabulary
     )
 
     word_idxs = caption_data[0][0].sentence
-    score = caption_data[0][0].score
+    # score = caption_data[0][0].score
     caption = vocabulary.get_sentence(word_idxs)
     captions.append(caption)
-    scores.append(score)
+    # scores.append(score)
 
     return {
         'captions': captions,
-        'caption_scores': scores,
+        # 'caption_scores': scores,
     }
 
 
