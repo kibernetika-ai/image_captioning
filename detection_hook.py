@@ -22,7 +22,7 @@ PARAMS = {
     'threshold': 0.2,
     'label_map': '',
     'face_model': '',
-    'face_threshold': 0.5,
+    'face_threshold': 0.3,
 }
 session = None
 caption_generator = None
@@ -104,6 +104,9 @@ def detection_init(**params):
 
 
 def face_init(**params):
+    threshold = params.get('face_threshold')
+    if threshold:
+        PARAMS['face_threshold'] = float(threshold)
     # Load driver
     face_model = params.get('face_model')
     if not face_model:
