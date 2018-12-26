@@ -40,9 +40,9 @@ def init_hook(**params):
     cfg.phase = 'test'
     cfg.beam_size = 3
     sess = tf.Session()
-    model = caption_model.CaptionGenerator(cfg)
+    caption_generator = caption_model.CaptionGenerator(cfg)
 
-    model.load(sess, PARAMS['model-file'])
+    caption_generator.load(sess, PARAMS['model-file'])
     tf.get_default_graph().finalize()
     session = sess
 
