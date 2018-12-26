@@ -18,7 +18,7 @@ PARAMS = {
     'vocabulary-size': 5000,
 }
 session = None
-model = None
+caption_generator = None
 
 
 def init_hook(**params):
@@ -28,7 +28,7 @@ def init_hook(**params):
     PARAMS['vocabulary-size'] = int(PARAMS['vocabulary-size'])
 
     global session
-    global model
+    global caption_generator
     global vocabulary
 
     vocabulary = dataset.Vocabulary(
@@ -112,7 +112,7 @@ def postprocess(outputs, ctx):
     captions = []
     scores = []
 
-    caption_data = model.beam_search_images(session, [ctx.np_image], vocabulary)
+    caption_data = caption_generator.beam_search_images(session, [ctx.np_image], vocabulary)
 
     word_idxs = caption_data[0][0].sentence
     score = caption_data[0][0].score
