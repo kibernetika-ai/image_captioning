@@ -369,7 +369,7 @@ def image_output(ctx, result):
             new_image = serving_hook.montage_caption(new_image, result['captions'][0])
 
     image_bytes = io.BytesIO()
-    new_image.save(image_bytes, format='PNG')
+    new_image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
     return {'output': image_bytes.getvalue()}
 
 
