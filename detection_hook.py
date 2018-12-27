@@ -1,8 +1,10 @@
+from concurrent import futures
 import io
 import logging
 from os import path
 
 from ml_serving.drivers import driver
+from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
 import tensorflow as tf
@@ -23,6 +25,7 @@ PARAMS = {
     'label_map': '',
     'face_model': '',
     'face_threshold': 0.3,
+    'pose_serving_addr': '',  # host:port
 }
 session = None
 caption_generator = None
@@ -153,11 +156,13 @@ def preprocess(inputs, ctx, **kwargs):
     if image is None:
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
 
+    ctx.raw_image = image[0]
     image = Image.open(io.BytesIO(image[0]))
     image = image.convert('RGB')
     ctx.image = image
     preprocessed = load_image(image)
-    ctx.np_image = np.array(preprocessed, np.float32)
+    ctx.caption_image = np.array(preprocessed, np.float32)
+    ctx.np_image = np.array(image)
 
     data = image.resize((300, 300), Image.ANTIALIAS)
     data = np.array(data).transpose([2, 0, 1]).reshape(1, 3, 300, 300)
@@ -166,7 +171,7 @@ def preprocess(inputs, ctx, **kwargs):
     ctx.face_image = data
 
     input_key = list(kwargs.get('model_inputs').keys())[0]
-    return {input_key: [np.array(image)]}
+    return {input_key: [ctx.np_image]}
 
 
 def get_caption_output(ctx):
@@ -177,7 +182,7 @@ def get_caption_output(ctx):
     # scores = []
 
     caption_data = caption_generator.beam_search_images(
-        session, [ctx.np_image], vocabulary
+        session, [ctx.caption_image], vocabulary
     )
 
     word_idxs = caption_data[0][0].sentence
@@ -192,7 +197,7 @@ def get_caption_output(ctx):
     }
 
 
-def get_detection_output(outputs):
+def get_detection_output(outputs, index=None):
     detection_boxes = outputs["detection_boxes"].reshape([-1, 4])
     detection_scores = outputs["detection_scores"].reshape([-1])
     detection_classes = np.int32((outputs["detection_classes"])).reshape([-1])
@@ -209,7 +214,7 @@ def get_detection_output(outputs):
     detection_boxes = detection_boxes[:max_boxes]
     detection_classes = detection_classes[:max_boxes]
 
-    classes = [category_index[i]['name'] for i in detection_classes]
+    classes = [index[i]['name'] for i in detection_classes]
 
     return {
         'detection_boxes': detection_boxes,
@@ -243,12 +248,35 @@ def get_face_output(outputs, ctx):
     }
 
 
-def postprocess(outputs, ctx):
-    caption_out = get_caption_output(ctx)
-    detection_out = get_detection_output(outputs)
-    face_out = get_face_output(outputs, ctx)
+def get_pose_output(ctx):
+    pose_addr = PARAMS['pose_serving_addr']
+    result = {}
+    if pose_addr:
+        pose_out = helpers.predict_grpc({'inputs': [ctx.raw_image]}, pose_addr)
+        result['pose_boxes'] = pose_out['detection_boxes']
+        result['pose_scores'] = pose_out['detection_scores']
+        result['pose_classes'] = pose_out['detection_classes']
+    return result
 
-    result = caption_out
-    result.update(detection_out)
-    result.update(face_out)
+
+def postprocess(outputs, ctx):
+    result = {}
+    tpool = futures.ThreadPoolExecutor(max_workers=4)
+
+    def process():
+        caption_out = get_caption_output(ctx)
+        detection_out = get_detection_output(outputs, index=category_index)
+        face_out = get_face_output(outputs, ctx)
+        result.update(caption_out)
+        result.update(detection_out)
+        result.update(face_out)
+
+    def poses():
+        pose_out = get_pose_output(ctx)
+        result.update(pose_out)
+
+    tpool.submit(process)
+    tpool.submit(poses)
+    tpool.shutdown()
+
     return result
