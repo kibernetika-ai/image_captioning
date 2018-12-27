@@ -151,10 +151,31 @@ def load_image(image):
     return image
 
 
+def set_detection_params(inputs, ctx):
+    detection_params = [
+        'detect_faces',
+        'detect_objects',
+        'build_caption',
+        'detect_poses',
+    ]
+    for param in detection_params:
+        raw_value = inputs.get(param)
+        if raw_value is not None:
+            LOG.info('%s=%s', param, raw_value)
+            value = raw_value[0]
+        else:
+            # True by default
+            value = True
+
+        setattr(ctx, param, value)
+
+
 def preprocess(inputs, ctx, **kwargs):
     image = inputs.get('input')
     if image is None:
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
+
+    set_detection_params(inputs, ctx)
 
     ctx.raw_image = image[0]
     image = Image.open(io.BytesIO(image[0]))
@@ -264,16 +285,22 @@ def postprocess(outputs, ctx):
     tpool = futures.ThreadPoolExecutor(max_workers=4)
 
     def process():
-        caption_out = get_caption_output(ctx)
-        detection_out = get_detection_output(outputs, index=category_index)
-        face_out = get_face_output(outputs, ctx)
-        result.update(caption_out)
-        result.update(detection_out)
-        result.update(face_out)
+        if ctx.build_caption:
+            caption_out = get_caption_output(ctx)
+            result.update(caption_out)
+
+        if ctx.detect_objects:
+            detection_out = get_detection_output(outputs, index=category_index)
+            result.update(detection_out)
+
+        if ctx.detect_faces:
+            face_out = get_face_output(outputs, ctx)
+            result.update(face_out)
 
     def poses():
-        pose_out = get_pose_output(ctx)
-        result.update(pose_out)
+        if ctx.detect_poses:
+            pose_out = get_pose_output(ctx)
+            result.update(pose_out)
 
     tpool.submit(process)
     tpool.submit(poses)
