@@ -173,7 +173,7 @@ def draw_bounding_box_on_image(image,
     draw.line([(left, top), (left, bottom), (right, bottom),
                (right, top), (left, top)], width=thickness, fill=color)
     try:
-        font = ImageFont.truetype('arial.ttf', 24)
+        font = ImageFont.truetype('Roboto-Bold.ttf', 24)
     except IOError:
         font = ImageFont.load_default()
 
@@ -529,6 +529,9 @@ def visualize_boxes_and_labels_on_image_array(
   """
     # Create a display string (and color) for every box location, group any boxes
     # that correspond to the same location.
+    unique_classes = list(sorted(set(classes)))
+    class_index = [unique_classes.index(i) + 1 for i in classes]
+
     box_to_display_str_map = collections.defaultdict(list)
     box_to_color_map = collections.defaultdict(str)
     box_to_instance_masks_map = {}
@@ -551,7 +554,12 @@ def visualize_boxes_and_labels_on_image_array(
                 display_str = ''
                 if not skip_labels:
                     if not agnostic_mode:
-                        if classes[i] in category_index.keys():
+                        if isinstance(classes[i], (six.string_types, bytes)):
+                            if isinstance(classes[i], bytes):
+                                class_name = classes[i].decode()
+                            else:
+                                class_name = classes[i]
+                        elif classes[i] in category_index.keys():
                             class_name = category_index[classes[i]]['name']
                         else:
                             class_name = 'N/A'
@@ -566,7 +574,7 @@ def visualize_boxes_and_labels_on_image_array(
                     box_to_color_map[box] = 'DarkOrange'
                 else:
                     box_to_color_map[box] = STANDARD_COLORS[
-                        classes[i] % len(STANDARD_COLORS)]
+                        class_index[i] % len(STANDARD_COLORS)]
 
     # Draw all boxes onto image.
     for box, color in box_to_color_map.items():

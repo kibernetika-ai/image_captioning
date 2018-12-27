@@ -7,12 +7,15 @@ from ml_serving.drivers import driver
 from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
+from PIL import ImageDraw
 import tensorflow as tf
 
 import config
 import dataset
 import model as caption_model
 import label_map_util
+import serving_hook
+import visualization_utils as vis_utils
 
 
 LOG = logging.getLogger(__name__)
@@ -25,7 +28,10 @@ PARAMS = {
     'label_map': '',
     'face_model': '',
     'face_threshold': 0.3,
+    'pose_threshold': 0.2,
     'pose_serving_addr': '',  # host:port
+    'output_type': 'boxes',  # Or 'image'
+    'line_thickness': 4,
 }
 session = None
 caption_generator = None
@@ -306,4 +312,69 @@ def postprocess(outputs, ctx):
     tpool.submit(poses)
     tpool.shutdown()
 
+    if PARAMS['output_type'] == 'image':
+        return image_output(ctx, result)
+
     return result
+
+
+def image_output(ctx, result):
+    image_arr = np.array(ctx.image)
+    if ctx.detect_objects:
+        vis_utils.visualize_boxes_and_labels_on_image_array(
+            image_arr,
+            result['detection_boxes'],
+            result['detection_classes'],
+            result['detection_scores'],
+            None,
+            use_normalized_coordinates=True,
+            max_boxes_to_draw=PARAMS['max_boxes'],
+            min_score_thresh=PARAMS['threshold'],
+            agnostic_mode=False,
+            line_thickness=PARAMS['line_thickness'],
+            skip_labels=False,
+            skip_scores=False,
+        )
+    if ctx.detect_poses:
+        vis_utils.visualize_boxes_and_labels_on_image_array(
+            image_arr,
+            result['pose_boxes'],
+            result['pose_classes'],
+            result['pose_scores'],
+            None,
+            use_normalized_coordinates=True,
+            max_boxes_to_draw=PARAMS['max_boxes'],
+            min_score_thresh=PARAMS['pose_threshold'],
+            agnostic_mode=False,
+            line_thickness=PARAMS['line_thickness'],
+            skip_labels=False,
+            skip_scores=False,
+        )
+    new_image = Image.fromarray(image_arr)
+    if ctx.detect_faces:
+        draw = ImageDraw.Draw(new_image)
+        face_boxes = result['face_boxes']
+        face_boxes[:, 0] = face_boxes[:, 0] * new_image.width
+        face_boxes[:, 2] = face_boxes[:, 2] * new_image.width
+        face_boxes[:, 1] = face_boxes[:, 1] * new_image.height
+        face_boxes[:, 3] = face_boxes[:, 3] * new_image.height
+        for box in face_boxes:
+            draw_rectangle(
+                draw, [(box[0], box[1]), (box[2], box[3])],
+                (250, 0, 250), PARAMS['line_thickness']
+            )
+
+    if ctx.build_caption:
+        if result['captions']:
+            new_image = serving_hook.montage_caption(new_image, result['captions'][0])
+
+    image_bytes = io.BytesIO()
+    new_image.save(image_bytes, format='PNG')
+    return {'output': image_bytes.getvalue()}
+
+
+def draw_rectangle(draw, coordinates, color, width=1):
+    for i in range(width):
+        rect_start = (coordinates[0][0] - i, coordinates[0][1] - i)
+        rect_end = (coordinates[1][0] + i, coordinates[1][1] + i)
+        draw.rectangle((rect_start, rect_end), outline=color)

@@ -108,24 +108,13 @@ def get_font(w, h, text):
         return ImageFont.load_default()
 
 
-def postprocess(outputs, ctx):
-    captions = []
-    scores = []
-
-    caption_data = caption_generator.beam_search_images(session, [ctx.np_image], vocabulary)
-
-    word_idxs = caption_data[0][0].sentence
-    score = caption_data[0][0].score
-    caption = vocabulary.get_sentence(word_idxs)
-    captions.append(caption)
-    scores.append(score)
-
-    w = ctx.image.size[0]
-    h = ctx.image.size[1]
+def montage_caption(image, caption):
+    w = image.size[0]
+    h = image.size[1]
     expanding = h // 8
     montage = Image.new(mode='RGBA', size=(w, h + expanding), color='white')
 
-    montage.paste(ctx.image, (0, expanding))
+    montage.paste(image, (0, expanding))
     draw = ImageDraw.Draw(montage)
 
     font = get_font(w, h, caption)
@@ -135,11 +124,24 @@ def postprocess(outputs, ctx):
     text_xy = (text_x, text_y)
     draw.text(text_xy, caption, font=font, fill='black')
 
+    return montage
+
+
+def postprocess(outputs, ctx):
+    captions = []
+
+    caption_data = caption_generator.beam_search_images(session, [ctx.np_image], vocabulary)
+
+    word_idxs = caption_data[0][0].sentence
+    caption = vocabulary.get_sentence(word_idxs)
+    captions.append(caption)
+
+    montage = montage_caption(ctx.image, caption)
+
     image_bytes = io.BytesIO()
     montage.save(image_bytes, format='PNG')
 
     return {
         'output': image_bytes.getvalue(),
         'captions': captions,
-        'scores': scores,
     }
