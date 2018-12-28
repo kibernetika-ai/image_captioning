@@ -8,6 +8,7 @@ from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
 from PIL import ImageDraw
+from PIL import ImageFont
 import tensorflow as tf
 
 import config
@@ -32,25 +33,29 @@ PARAMS = {
     'pose_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
     'line_thickness': 4,
+    # /opt/intel/computer_vision_sdk/deployment_tools/intel_models/emotions-recognition-retail-0003/FP32/emotions-recognition-retail-0003.xml
+    'emotion_model': '',
 }
 session = None
 caption_generator = None
 category_index = None
 face_serving = None
+emotion_serving = None
 
 
 def init_hook(**params):
     global PARAMS
     PARAMS.update(params)
 
-    caption_init(**params)
-    detection_init(**params)
-    face_init(**params)
+    caption_init(**PARAMS)
+    detection_init(**PARAMS)
+    face_init(**PARAMS)
+    emotion_init(**PARAMS)
 
 
 def caption_init(**params):
-    model_file = PARAMS['model-file']
-    vocabulary_file = PARAMS['vocabulary-file']
+    model_file = params['model-file']
+    vocabulary_file = params['vocabulary-file']
     if not path.exists(model_file) and not path.exists(vocabulary_file):
         return
 
@@ -66,7 +71,7 @@ def caption_init(**params):
     LOG.info('[Captions] Loading vocabulary at %s...' % vocabulary_file)
 
     vocabulary = dataset.Vocabulary(
-        PARAMS['vocabulary-size'],
+        params['vocabulary-size'],
         vocabulary_file,
     )
 
@@ -129,6 +134,28 @@ def face_init(**params):
     face_serving = drv()
     face_serving.load_model(
         face_model,
+        device='CPU',
+        flexible_batch_size=True,
+    )
+
+    LOG.info('Loaded.')
+    LOG.info('------------------------')
+
+
+def emotion_init(**params):
+    # Load driver
+    emotion_model = params.get('emotion_model')
+    if not emotion_model:
+        return
+
+    LOG.info('------------------------')
+    LOG.info('Loading emotion model at %s...' % emotion_model)
+    drv = driver.load_driver('openvino')
+    # Instantiate driver
+    global emotion_serving
+    emotion_serving = drv()
+    emotion_serving.load_model(
+        emotion_model,
         device='CPU',
         flexible_batch_size=True,
     )
@@ -275,6 +302,61 @@ def get_face_output(outputs, ctx):
     }
 
 
+emotions = [
+    'neutral', 'happy', 'sad', 'surprise', 'anger'
+]
+
+
+def dict_zip(a, b):
+    zipped = zip(a, b)
+    return dict(zipped)
+
+
+def get_emotion_output(image, face_boxes):
+    if emotion_serving is None:
+        return {}
+    if len(face_boxes) == 0:
+        return {}
+
+    input_name = list(emotion_serving.inputs.keys())[0]
+
+    input_images = np.zeros([len(face_boxes), 3, 64, 64])
+    boxes = np.copy(face_boxes)
+    boxes[:, 0] = boxes[:, 0] * image.width
+    boxes[:, 2] = boxes[:, 2] * image.width
+    boxes[:, 1] = boxes[:, 1] * image.height
+    boxes[:, 3] = boxes[:, 3] * image.height
+    for i, box in enumerate(boxes):
+        xmin = box[0]
+        ymin = box[1]
+        xmax = box[2]
+        ymax = box[3]
+        # Crop
+        resized = image.crop((xmin, ymin, xmax, ymax)).resize((64, 64))
+        input_images[i] = np.array(resized).transpose([2, 0, 1])
+
+    # Convert to BGR
+    input_images = input_images[:, ::-1, :, :]
+    feed_dict = {input_name: input_images}
+    emotion_out = emotion_serving.predict(feed_dict)
+    # Shape: [N, 5, 1, 1]
+    emotion_prob = list(emotion_out.values())[0].reshape([-1, 5])
+
+    # TODO: how to pass the value below from serving?
+    # TODO: Tensor proto doesn't allow to pass structures like that.
+    # TODO: It allows only one-typed many-dimensioned list.
+    # [{'happy': 0.78, 'sad': 0.01, 'angry': 0.1}]
+    # full_emotions_prob = list(map(dict_zip, [emotions] * len(emotion_prob), emotion_prob))
+
+    emotions_max = np.array(emotions)[emotion_prob.argmax(axis=1)]
+
+    return {
+        'emotion_prob': emotion_prob,
+        'emotion_max': emotions_max,
+        'possible_emotions': emotions,
+    }
+
+
 def get_pose_output(ctx):
     pose_addr = PARAMS['pose_serving_addr']
     result = {}
@@ -303,6 +385,9 @@ def postprocess(outputs, ctx):
             face_out = get_face_output(outputs, ctx)
             result.update(face_out)
 
+            emotion_out = get_emotion_output(ctx.image, face_out['face_boxes'])
+            result.update(emotion_out)
+
     def poses():
         if ctx.detect_poses:
             pose_out = get_pose_output(ctx)
@@ -319,10 +404,9 @@ def postprocess(outputs, ctx):
 
 
 def image_output(ctx, result):
-    image_arr = np.array(ctx.image)
     if ctx.detect_objects:
-        vis_utils.visualize_boxes_and_labels_on_image_array(
-            image_arr,
+        vis_utils.visualize_boxes_and_labels_on_image(
+            ctx.image,
             result['detection_boxes'],
             result['detection_classes'],
             result['detection_scores'],
@@ -335,9 +419,9 @@ def image_output(ctx, result):
             skip_labels=False,
             skip_scores=False,
         )
-    if ctx.detect_poses:
-        vis_utils.visualize_boxes_and_labels_on_image_array(
-            image_arr,
+    if ctx.detect_poses and PARAMS['pose_serving_addr']:
+        vis_utils.visualize_boxes_and_labels_on_image(
+            ctx.image,
             result['pose_boxes'],
             result['pose_classes'],
             result['pose_scores'],
@@ -350,26 +434,30 @@ def image_output(ctx, result):
             skip_labels=False,
             skip_scores=False,
         )
-    new_image = Image.fromarray(image_arr)
     if ctx.detect_faces:
-        draw = ImageDraw.Draw(new_image)
         face_boxes = result['face_boxes']
-        face_boxes[:, 0] = face_boxes[:, 0] * new_image.width
-        face_boxes[:, 2] = face_boxes[:, 2] * new_image.width
-        face_boxes[:, 1] = face_boxes[:, 1] * new_image.height
-        face_boxes[:, 3] = face_boxes[:, 3] * new_image.height
-        for box in face_boxes:
-            draw_rectangle(
-                draw, [(box[0], box[1]), (box[2], box[3])],
-                (250, 0, 250), PARAMS['line_thickness']
+        emotion_max = result['emotion_max']
+        emotion_prob = result['emotion_prob']
+        for i, box in enumerate(face_boxes):
+            display_str = '%s: %d%%' % (emotion_max[i], int(max(emotion_prob[i]) * 100))
+            vis_utils.draw_bounding_box_on_image(
+                ctx.image,
+                box[1],
+                box[0],
+                box[3],
+                box[2],
+                color=(250, 0, 250),
+                thickness=PARAMS['line_thickness'],
+                display_str_list=(display_str,),
+                use_normalized_coordinates=True,
             )
 
     if ctx.build_caption:
         if result['captions']:
-            new_image = serving_hook.montage_caption(new_image, result['captions'][0])
+            ctx.image = serving_hook.montage_caption(ctx.image, result['captions'][0])
 
     image_bytes = io.BytesIO()
-    new_image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+    ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
     return {'output': image_bytes.getvalue()}
 
 
