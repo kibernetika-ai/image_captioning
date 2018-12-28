@@ -434,7 +434,7 @@ def image_output(ctx, result):
             skip_labels=False,
             skip_scores=False,
         )
-    if ctx.detect_faces:
+    if ctx.detect_faces and result.get('face_boxes'):
         face_boxes = result['face_boxes']
         emotion_max = result['emotion_max']
         emotion_prob = result['emotion_prob']
