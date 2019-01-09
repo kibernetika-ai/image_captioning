@@ -7,8 +7,6 @@ from ml_serving.drivers import driver
 from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
-from PIL import ImageDraw
-from PIL import ImageFont
 import tensorflow as tf
 
 import config
@@ -38,6 +36,7 @@ PARAMS = {
 }
 session = None
 caption_generator = None
+caption_type = 'image_captioning'  # or 'im2txt'
 category_index = None
 face_serving = None
 emotion_serving = None
@@ -54,40 +53,7 @@ def init_hook(**params):
 
 
 def caption_init(**params):
-    model_file = params['model-file']
-    vocabulary_file = params['vocabulary-file']
-    if not path.exists(model_file) and not path.exists(vocabulary_file):
-        return
-
-    LOG.info('------------------------')
-    LOG.info('Loading image-caption model...')
-
-    PARAMS['vocabulary-size'] = int(PARAMS['vocabulary-size'])
-
-    global session
-    global caption_generator
-    global vocabulary
-
-    LOG.info('[Captions] Loading vocabulary at %s...' % vocabulary_file)
-
-    vocabulary = dataset.Vocabulary(
-        params['vocabulary-size'],
-        vocabulary_file,
-    )
-
-    cfg = config.Config()
-    cfg.phase = 'test'
-    cfg.beam_size = 3
-    sess = tf.Session()
-    caption_generator = caption_model.CaptionGenerator(cfg)
-
-    LOG.info('[Captions] Loading model at %s...' % model_file)
-    caption_generator.load(sess, model_file)
-    tf.get_default_graph().finalize()
-    session = sess
-
-    LOG.info('Loaded.')
-    LOG.info('------------------------')
+    serving_hook.init_hook(**params)
 
 
 def detection_init(**params):
@@ -164,26 +130,6 @@ def emotion_init(**params):
     LOG.info('------------------------')
 
 
-def load_image(image):
-    """ Preprocess an image. """
-    # if self.bgr:
-    #     temp = image.swapaxes(0, 2)
-    #     temp = temp[::-1]
-    #     image = temp.swapaxes(0, 2)
-    scale_shape = np.array([224, 224], np.int32)
-    crop_shape = np.array([224, 224], np.int32)
-    mean = np.array([104.00698793, 116.66876762, 122.67891434])
-
-    image = image.resize((scale_shape[0], scale_shape[1]), Image.LANCZOS)
-    image = np.array(image)
-    offset = (scale_shape - crop_shape) / 2
-    offset = offset.astype(np.int32)
-    image = image[offset[0]:offset[0]+crop_shape[0],
-                  offset[1]:offset[1]+crop_shape[1]]
-    image = image - mean
-    return image
-
-
 def set_detection_params(inputs, ctx):
     detection_params = [
         'detect_faces',
@@ -214,8 +160,10 @@ def preprocess(inputs, ctx, **kwargs):
     image = Image.open(io.BytesIO(image[0]))
     image = image.convert('RGB')
     ctx.image = image
-    preprocessed = load_image(image)
-    ctx.caption_image = np.array(preprocessed, np.float32)
+    if serving_hook.caption_type == serving_hook.IMAGE_CAPTIONING:
+        preprocessed = serving_hook.load_image(image)
+        ctx.caption_image = np.array(preprocessed, np.float32)
+
     ctx.np_image = np.array(image)
 
     data = image.resize((300, 300), Image.ANTIALIAS)
@@ -226,29 +174,6 @@ def preprocess(inputs, ctx, **kwargs):
 
     input_key = list(kwargs.get('model_inputs').keys())[0]
     return {input_key: [ctx.np_image]}
-
-
-def get_caption_output(ctx):
-    if caption_generator is None:
-        return {}
-
-    captions = []
-    # scores = []
-
-    caption_data = caption_generator.beam_search_images(
-        session, [ctx.caption_image], vocabulary
-    )
-
-    word_idxs = caption_data[0][0].sentence
-    # score = caption_data[0][0].score
-    caption = vocabulary.get_sentence(word_idxs)
-    captions.append(caption)
-    # scores.append(score)
-
-    return {
-        'captions': captions,
-        # 'caption_scores': scores,
-    }
 
 
 def get_detection_output(outputs, index=None):
@@ -374,7 +299,7 @@ def postprocess(outputs, ctx):
 
     def process():
         if ctx.build_caption:
-            caption_out = get_caption_output(ctx)
+            caption_out = serving_hook.get_caption_output(ctx)
             result.update(caption_out)
 
         if ctx.detect_objects:

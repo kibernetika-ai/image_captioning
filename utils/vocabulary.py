@@ -71,6 +71,7 @@ class Vocabulary(object):
         """ Load the vocabulary from a file. """
         assert os.path.exists(save_file)
         data = pd.read_csv(save_file)
+        self.size = len(data)
         self.words = data['word'].values
         self.word2idx = {self.words[i]:i for i in range(self.size)}
         self.word_frequencies = data['frequency'].values
