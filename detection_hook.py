@@ -1,17 +1,12 @@
 from concurrent import futures
 import io
 import logging
-from os import path
 
 from ml_serving.drivers import driver
 from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
-import tensorflow as tf
 
-import config
-import dataset
-import model as caption_model
 import label_map_util
 import serving_hook
 import visualization_utils as vis_utils
