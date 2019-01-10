@@ -25,7 +25,7 @@ PARAMS = {
     'face_model': '',
     'face_threshold': 0.3,
     'pose_threshold': 0.5,
-    'pose_serving_addr': '',  # host:port
+    'remote_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
     'line_thickness': 4,
     # /opt/intel/computer_vision_sdk/deployment_tools/intel_models/emotions-recognition-retail-0003/FP32/emotions-recognition-retail-0003.xml
@@ -43,6 +43,10 @@ emotion_serving = None
 def init_hook(**params):
     global PARAMS
     PARAMS.update(params)
+
+    remote_serving = PARAMS['remote_serving_addr']
+    if remote_serving:
+        return
 
     caption_init(**PARAMS)
     detection_init(**PARAMS)
@@ -374,12 +378,12 @@ def postprocess_poses(outputs, ctx):
         result.update(pose_out)
 
     if PARAMS['output_type'] == 'image':
-        return image_output(ctx, result)
+        return image_output(ctx, result, PARAMS)
 
     return result
 
 
-def image_output(ctx, result):
+def image_output(ctx, result, params):
     if ctx.detect_objects:
         vis_utils.visualize_boxes_and_labels_on_image(
             ctx.image,
@@ -388,14 +392,14 @@ def image_output(ctx, result):
             result['detection_scores'],
             None,
             use_normalized_coordinates=True,
-            max_boxes_to_draw=PARAMS['max_boxes'],
-            min_score_thresh=PARAMS['threshold'],
+            max_boxes_to_draw=params['max_boxes'],
+            min_score_thresh=params['threshold'],
             agnostic_mode=False,
-            line_thickness=PARAMS['line_thickness'],
+            line_thickness=params['line_thickness'],
             skip_labels=False,
             skip_scores=False,
         )
-    if ctx.detect_poses and PARAMS['pose_serving_addr']:
+    if ctx.detect_poses:
         vis_utils.visualize_boxes_and_labels_on_image(
             ctx.image,
             result['pose_boxes'],
@@ -403,10 +407,10 @@ def image_output(ctx, result):
             result['pose_scores'],
             None,
             use_normalized_coordinates=True,
-            max_boxes_to_draw=PARAMS['max_boxes'],
-            min_score_thresh=PARAMS['pose_threshold'],
+            max_boxes_to_draw=params['max_boxes'],
+            min_score_thresh=params['pose_threshold'],
             agnostic_mode=False,
-            line_thickness=PARAMS['line_thickness'],
+            line_thickness=params['line_thickness'],
             skip_labels=False,
             skip_scores=False,
         )
@@ -423,7 +427,7 @@ def image_output(ctx, result):
                 box[3],
                 box[2],
                 color=(250, 0, 250),
-                thickness=PARAMS['line_thickness'],
+                thickness=params['line_thickness'],
                 display_str_list=(display_str,),
                 use_normalized_coordinates=True,
             )
