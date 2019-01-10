@@ -187,6 +187,14 @@ def preprocess_detection(inputs, ctx, **kwargs):
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
 
     set_detection_params(inputs, ctx)
+    output_type = inputs.get('output_type')
+    if output_type is not None:
+        if len(output_type.shape) < 1:
+            ctx.output_type = output_type.tolist().decode()
+        else:
+            ctx.output_type = output_type[0].decode()
+    else:
+        ctx.output_type = PARAMS['output_type']
 
     ctx.raw_image = image[0]
     image = Image.open(io.BytesIO(image[0]))
@@ -377,7 +385,7 @@ def postprocess_poses(outputs, ctx):
         pose_out = get_pose_output(pose_out, ctx)
         result.update(pose_out)
 
-    if PARAMS['output_type'] == 'image':
+    if ctx.output_type == 'image':
         return image_output(ctx, result, PARAMS)
 
     return result

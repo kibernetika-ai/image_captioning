@@ -31,6 +31,8 @@ def preprocess(inputs, ctx, **kwargs):
     if image is None:
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
 
+    inputs['output_type'] = 'boxes'
+
     return helpers.predict_grpc(inputs, PARAMS['remote_serving_addr'])
 
 
