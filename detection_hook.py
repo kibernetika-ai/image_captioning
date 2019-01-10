@@ -1,6 +1,7 @@
 from concurrent import futures
 import io
 import logging
+import time
 
 from ml_serving.drivers import driver
 from ml_serving.utils import helpers
@@ -20,9 +21,10 @@ PARAMS = {
     'max_boxes': 50,
     'threshold': 0.2,
     'label_map': '',
+    'pose_label_map': '',
     'face_model': '',
     'face_threshold': 0.3,
-    'pose_threshold': 0.2,
+    'pose_threshold': 0.5,
     'pose_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
     'line_thickness': 4,
@@ -33,6 +35,7 @@ session = None
 caption_generator = None
 caption_type = 'image_captioning'  # or 'im2txt'
 category_index = None
+pose_index = None
 face_serving = None
 emotion_serving = None
 
@@ -45,6 +48,7 @@ def init_hook(**params):
     detection_init(**PARAMS)
     face_init(**PARAMS)
     emotion_init(**PARAMS)
+    pose_init(**PARAMS)
 
 
 def caption_init(**params):
@@ -75,6 +79,33 @@ def detection_init(**params):
     )
     global category_index
     category_index = label_map_util.create_category_index(categories)
+    LOG.info('Loaded.')
+
+
+def pose_init(**params):
+    threshold = params.get('pose_threshold')
+    max_boxes = params.get('max_boxes')
+    if threshold:
+        PARAMS['pose_threshold'] = float(threshold)
+
+    if max_boxes:
+        PARAMS['max_boxes'] = int(max_boxes)
+
+    label_map_path = params.get('pose_label_map')
+    if not label_map_path:
+        raise RuntimeError(
+            'Label map required. Provide path to label_map via'
+            ' -o pose_label_map=<label_map.pbtxt>'
+        )
+
+    LOG.info('Loading label map from %s...' % label_map_path)
+    label_map = label_map_util.load_labelmap(label_map_path)
+    max_num_classes = max([item.id for item in label_map.item])
+    categories = label_map_util.convert_label_map_to_categories(
+        label_map, max_num_classes
+    )
+    global pose_index
+    pose_index = label_map_util.create_category_index(categories)
     LOG.info('Loaded.')
 
 
@@ -144,7 +175,9 @@ def set_detection_params(inputs, ctx):
         setattr(ctx, param, value)
 
 
-def preprocess(inputs, ctx, **kwargs):
+def preprocess_detection(inputs, ctx, **kwargs):
+    t = time.time()
+
     image = inputs.get('input')
     if image is None:
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
@@ -168,16 +201,26 @@ def preprocess(inputs, ctx, **kwargs):
     ctx.face_image = data
 
     input_key = list(kwargs.get('model_inputs').keys())[0]
+    LOG.info('preprocess detection: %.3fms' % ((time.time() - t) * 1000))
+    ctx.t = time.time()
+
     return {input_key: [ctx.np_image]}
 
 
-def get_detection_output(outputs, index=None):
+def preprocess_poses(inputs, ctx):
+    ctx.t = time.time()
+    if ctx.detect_poses:
+        return {'inputs': [ctx.np_image]}
+    else:
+        return {'inputs': np.zeros([1, 10, 10, 3]), 'ml-serving-ignore': True}
+
+
+def get_detection_output(outputs, index=None, threshold=PARAMS['threshold']):
     detection_boxes = outputs["detection_boxes"].reshape([-1, 4])
     detection_scores = outputs["detection_scores"].reshape([-1])
     detection_classes = np.int32((outputs["detection_classes"])).reshape([-1])
 
     max_boxes = PARAMS['max_boxes']
-    threshold = PARAMS['threshold']
 
     detection_scores = detection_scores[np.where(detection_scores > threshold)]
     if len(detection_scores) < max_boxes:
@@ -277,45 +320,58 @@ def get_emotion_output(image, face_boxes):
     }
 
 
-def get_pose_output(ctx):
-    pose_addr = PARAMS['pose_serving_addr']
+def get_pose_output(outputs, ctx):
     result = {}
-    if pose_addr:
-        pose_out = helpers.predict_grpc({'inputs': [ctx.raw_image]}, pose_addr)
-        result['pose_boxes'] = pose_out['detection_boxes']
-        result['pose_scores'] = pose_out['detection_scores']
-        result['pose_classes'] = pose_out['detection_classes']
+    pose_out = outputs
+    result['pose_boxes'] = pose_out['detection_boxes']
+    result['pose_scores'] = pose_out['detection_scores']
+    result['pose_classes'] = pose_out['detection_classes']
     return result
 
 
-def postprocess(outputs, ctx):
+def postprocess_detection(outputs, ctx):
     result = {}
-    tpool = futures.ThreadPoolExecutor(max_workers=4)
+    LOG.info('object-detection: %.3fms' % ((time.time() - ctx.t) * 1000))
 
     def process():
         if ctx.build_caption:
+            t = time.time()
             caption_out = serving_hook.get_caption_output(ctx)
             result.update(caption_out)
+
+            LOG.info('build caption: %.3fms' % ((time.time() - t) * 1000))
 
         if ctx.detect_objects:
             detection_out = get_detection_output(outputs, index=category_index)
             result.update(detection_out)
 
         if ctx.detect_faces:
+            t = time.time()
             face_out = get_face_output(outputs, ctx)
             result.update(face_out)
+
+            LOG.info('face-detection: %.3fms' % ((time.time() - t) * 1000))
+            t = time.time()
 
             emotion_out = get_emotion_output(ctx.image, face_out['face_boxes'])
             result.update(emotion_out)
 
-    def poses():
-        if ctx.detect_poses:
-            pose_out = get_pose_output(ctx)
-            result.update(pose_out)
+            LOG.info('emotion-detection: %.3fms' % ((time.time() - t) * 1000))
 
-    tpool.submit(process)
-    tpool.submit(poses)
-    tpool.shutdown()
+    process()
+    ctx.result = result
+
+    return result
+
+
+def postprocess_poses(outputs, ctx):
+    result = ctx.result
+    LOG.info('pose-detection: %.3fms' % ((time.time() - ctx.t) * 1000))
+
+    if ctx.detect_poses:
+        pose_out = get_detection_output(outputs, pose_index, PARAMS['pose_threshold'])
+        pose_out = get_pose_output(pose_out, ctx)
+        result.update(pose_out)
 
     if PARAMS['output_type'] == 'image':
         return image_output(ctx, result)
@@ -379,6 +435,16 @@ def image_output(ctx, result):
     image_bytes = io.BytesIO()
     ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
     return {'output': image_bytes.getvalue()}
+
+
+preprocess = [
+    preprocess_detection,
+    preprocess_poses
+]
+postprocess = [
+    postprocess_detection,
+    postprocess_poses
+]
 
 
 def draw_rectangle(draw, coordinates, color, width=1):

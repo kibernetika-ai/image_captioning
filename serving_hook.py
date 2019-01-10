@@ -107,7 +107,9 @@ def load_im2txt(model_file, vocabulary_file):
     vocabulary = im2txt_vocab.Vocabulary(vocabulary_file)
 
     # Create session
-    sess = tf.Session(graph=g)
+    config_proto = tf.ConfigProto()
+    config_proto.gpu_options.allow_growth = True
+    sess = tf.Session(graph=g, config=config_proto)
     # Load the model from checkpoint.
     restore_fn(sess)
 
