@@ -5,7 +5,6 @@ import time
 from ml_serving.drivers import driver
 import numpy as np
 from PIL import Image
-from PIL import ExifTags
 
 import label_map_util
 import serving_hook
@@ -178,13 +177,15 @@ def set_detection_params(inputs, ctx):
         setattr(ctx, param, value)
 
 
-def rotate_by_exif(image):
+def rotate_by_exif(image, ctx=None):
     if "exif" not in image.info:
         return image
 
     orientation = image._getexif().get(274)
     if not orientation:
         return image
+
+    rotated = True
 
     if orientation == 3:
         image = image.rotate(180, expand=True)
@@ -198,6 +199,14 @@ def rotate_by_exif(image):
         image = image.rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
     elif orientation == 8:
         image = image.rotate(90, expand=True)
+    else:
+        rotated = False
+
+    if rotated and ctx is not None:
+        # Set raw_image
+        image_bytes = io.BytesIO()
+        image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+        ctx.raw_image = image_bytes.getvalue()
 
     return image
 
@@ -223,7 +232,7 @@ def preprocess_detection(inputs, ctx, **kwargs):
     image = Image.open(io.BytesIO(image[0]))
 
     # Rotate if exif tags specified
-    image = rotate_by_exif(image)
+    image = rotate_by_exif(image, ctx)
 
     image = image.convert('RGB')
     ctx.image = image
