@@ -1,12 +1,11 @@
-from concurrent import futures
 import io
 import logging
 import time
 
 from ml_serving.drivers import driver
-from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
+from PIL import ExifTags
 
 import label_map_util
 import serving_hook
@@ -179,6 +178,30 @@ def set_detection_params(inputs, ctx):
         setattr(ctx, param, value)
 
 
+def rotate_by_exif(image):
+    if "exif" not in image.info:
+        return image
+
+    orientation = image._getexif().get(274)
+    if not orientation:
+        return image
+
+    if orientation == 3:
+        image = image.rotate(180, expand=True)
+    elif orientation == 4:
+        image = image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 5:
+        image = image.rotate(-90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 6:
+        image = image.rotate(-90, expand=True)
+    elif orientation == 7:
+        image = image.rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 8:
+        image = image.rotate(90, expand=True)
+
+    return image
+
+
 def preprocess_detection(inputs, ctx, **kwargs):
     t = time.time()
 
@@ -198,6 +221,10 @@ def preprocess_detection(inputs, ctx, **kwargs):
 
     ctx.raw_image = image[0]
     image = Image.open(io.BytesIO(image[0]))
+
+    # Rotate if exif tags specified
+    image = rotate_by_exif(image)
+
     image = image.convert('RGB')
     ctx.image = image
     if serving_hook.caption_type == serving_hook.IMAGE_CAPTIONING:
