@@ -51,4 +51,5 @@ def postprocess(outputs, ctx):
     if PARAMS['output_type'] == 'image':
         return detection_hook.image_output(ctx, result, PARAMS)
 
+    # result['table_output'] = detection_hook.result_table_string(result, ctx)
     return result

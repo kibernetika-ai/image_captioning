@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import time
 
@@ -412,6 +413,36 @@ def postprocess_detection(outputs, ctx):
     return result
 
 
+def result_table_string(result_dict, ctx):
+    table = []
+
+    def append(type_, name, prob):
+        table.append({'type': type_, 'name': name, 'prob': float(prob)})
+
+    if ctx.detect_objects:
+        for name, prob in zip(result_dict['detection_classes'], result_dict['detection_scores']):
+            append('object', name, prob)
+
+    if ctx.detect_poses:
+        for name, prob in zip(result_dict['pose_classes'], result_dict['pose_scores']):
+            append('pose', name, prob)
+
+    if ctx.build_caption:
+        for caption in result_dict['captions']:
+            append('caption', caption, 0.1)
+
+    if ctx.detect_faces and len(result_dict.get('face_boxes', [])) > 0:
+        for prob in result_dict['face_scores']:
+            append('face', 'face', prob)
+
+        emotion_max = result_dict['emotion_max']
+        emotion_prob = result_dict['emotion_prob']
+        for i, _ in enumerate(result_dict['face_boxes']):
+            append('emotion', emotion_max[i], max(emotion_prob[i]))
+
+    return json.dumps(table)
+
+
 def postprocess_poses(outputs, ctx):
     result = ctx.result
     LOG.info('pose-detection: %.3fms' % ((time.time() - ctx.t) * 1000))
@@ -424,6 +455,7 @@ def postprocess_poses(outputs, ctx):
     if ctx.output_type == 'image':
         return image_output(ctx, result, PARAMS)
 
+    result['table_output'] = result_table_string(result, ctx)
     return result
 
 
@@ -482,7 +514,7 @@ def image_output(ctx, result, params):
 
     image_bytes = io.BytesIO()
     ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
-    return {'output': image_bytes.getvalue()}
+    return {'output': image_bytes.getvalue(), 'table_output': result_table_string(result, ctx)}
 
 
 preprocess = [
