@@ -244,6 +244,7 @@ def preprocess_detection(inputs, ctx, **kwargs):
     ctx.np_image = np.array(image)
 
     data = image.resize((300, 300), Image.ANTIALIAS)
+    ctx.pose_image = np.array(data)
     data = np.array(data).transpose([2, 0, 1]).reshape(1, 3, 300, 300)
     # convert to BGR
     data = data[:, ::-1, :, :]
@@ -259,7 +260,8 @@ def preprocess_detection(inputs, ctx, **kwargs):
 def preprocess_poses(inputs, ctx):
     ctx.t = time.time()
     if ctx.detect_poses:
-        return {'inputs': [ctx.np_image]}
+        # return {'inputs': [ctx.np_image]}
+        return {'inputs': [ctx.pose_image]}
     else:
         return {'inputs': np.zeros([1, 10, 10, 3]), 'ml-serving-ignore': True}
 
@@ -460,6 +462,7 @@ def postprocess_poses(outputs, ctx):
 
 
 def image_output(ctx, result, params):
+    t = time.time()
     if ctx.detect_objects:
         vis_utils.visualize_boxes_and_labels_on_image(
             ctx.image,
@@ -514,6 +517,9 @@ def image_output(ctx, result, params):
 
     image_bytes = io.BytesIO()
     ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+
+    LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
+
     return {'output': image_bytes.getvalue(), 'table_output': result_table_string(result, ctx)}
 
 
