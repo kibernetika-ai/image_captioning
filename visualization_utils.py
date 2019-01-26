@@ -36,6 +36,12 @@ import PIL.ImageFont as ImageFont
 import six
 import tensorflow as tf
 
+try:
+    import cv2
+except ImportError:
+    DRAW_TYPE = 'PIL'
+else:
+    DRAW_TYPE = 'opencv'
 
 _TITLE_LEFT_MARGIN = 10
 _TITLE_TOP_MARGIN = 10
@@ -163,24 +169,47 @@ def draw_bounding_box_on_image(image,
       ymin, xmin, ymax, xmax as relative to the image.  Otherwise treat
       coordinates as absolute.
   """
-    draw = ImageDraw.Draw(image)
-    im_width, im_height = image.size
+    if DRAW_TYPE == 'PIL':
+        draw = ImageDraw.Draw(image)
+        im_width, im_height = image.size
+    else:
+        im_width = image.shape[1]
+        im_height = image.shape[0]
+
     if use_normalized_coordinates:
         (left, right, top, bottom) = (xmin * im_width, xmax * im_width,
                                       ymin * im_height, ymax * im_height)
     else:
         (left, right, top, bottom) = (xmin, xmax, ymin, ymax)
-    draw.line([(left, top), (left, bottom), (right, bottom),
-               (right, top), (left, top)], width=thickness, fill=color)
-    try:
-        font = ImageFont.truetype('Roboto-Bold.ttf', 24)
-    except IOError:
-        font = ImageFont.load_default()
 
+    points = [
+        (left, top),
+        (left, bottom),
+        (right, bottom),
+        (right, top),
+        (left, top),
+    ]
+    if DRAW_TYPE == 'PIL':
+        draw.line(points, width=thickness, fill=color)
+    else:
+        points = np.int32(points)
+        cv2.polylines(image, [points], False, color=ImageColor.getrgb(color), thickness=thickness)
+
+    if DRAW_TYPE == 'PIL':
+        try:
+            font = ImageFont.truetype('Roboto-Bold.ttf', 24)
+        except IOError:
+            font = ImageFont.load_default()
+        display_str_heights = [font.getsize(ds)[1] for ds in display_str_list]
+    else:
+        font = cv2.FONT_HERSHEY_TRIPLEX
+        font_scale = 0.8
+        font_thickness = 1
+        display_str_heights = [cv2.getTextSize(ds, font, font_scale, font_thickness)[1] for ds in display_str_list]
     # If the total height of the display strings added to the top of the bounding
     # box exceeds the top of the image, stack the strings below the bounding box
     # instead of above.
-    display_str_heights = [font.getsize(ds)[1] for ds in display_str_list]
+
     # Each display_str has a top and bottom margin of 0.05x.
     total_display_str_height = (1 + 2 * 0.05) * sum(display_str_heights)
 
@@ -190,17 +219,43 @@ def draw_bounding_box_on_image(image,
         text_bottom = bottom + total_display_str_height
     # Reverse list and print from bottom to top.
     for display_str in display_str_list[::-1]:
-        text_width, text_height = font.getsize(display_str)
+        if DRAW_TYPE == 'PIL':
+            text_width, text_height = font.getsize(display_str)
+        else:
+            size = cv2.getTextSize(display_str, font, font_scale, font_thickness)
+            text_width = size[0][0]
+            text_height = size[0][1]
+
         margin = np.ceil(0.05 * text_height)
-        draw.rectangle(
-            [(left, text_bottom - text_height - 2 * margin), (left + text_width,
-                                                              text_bottom)],
-            fill=color)
-        draw.text(
-            (left + margin, text_bottom - text_height - margin),
-            display_str,
-            fill='black',
-            font=font)
+
+        if DRAW_TYPE == 'PIL':
+            draw.rectangle(
+                [(left, text_bottom - text_height - 2 * margin), (left + text_width,
+                                                                  text_bottom)],
+                fill=color)
+            draw.text(
+                (left + margin, text_bottom - text_height - margin),
+                display_str,
+                fill='black',
+                font=font)
+        else:
+            cv2.rectangle(
+                image,
+                (int(left), int(text_bottom - text_height - thickness - 2 - 2 * margin)),
+                (int(left + text_width), int(text_bottom)),
+                ImageColor.getrgb(color),
+                thickness=cv2.FILLED,
+            )
+            cv2.putText(
+                image,
+                display_str,
+                (int(left + margin), int(text_bottom - margin - thickness)),
+                font,
+                font_scale,
+                color=ImageColor.getrgb('black'),
+                thickness=font_thickness,
+                lineType=cv2.LINE_AA,
+            )
         text_bottom -= text_height - 2 * margin
 
 

@@ -3,6 +3,7 @@ import json
 import logging
 import time
 
+import cv2
 from ml_serving.drivers import driver
 import numpy as np
 from PIL import Image
@@ -170,7 +171,10 @@ def set_detection_params(inputs, ctx):
         raw_value = inputs.get(param)
         if raw_value is not None:
             LOG.info('%s=%s', param, raw_value)
-            value = raw_value[0]
+            if len(raw_value.shape) > 0:
+                value = raw_value[0]
+            else:
+                value = bool(raw_value)
         else:
             # True by default
             value = True
@@ -230,12 +234,14 @@ def preprocess_detection(inputs, ctx, **kwargs):
         ctx.output_type = PARAMS['output_type']
 
     ctx.raw_image = image[0]
-    image = Image.open(io.BytesIO(image[0]))
+    image = cv2.imdecode(np.fromstring(image[0], np.uint8), cv2.IMREAD_COLOR)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # image = Image.open(io.BytesIO(image[0]))
 
     # Rotate if exif tags specified
-    image = rotate_by_exif(image, ctx)
+    # image = rotate_by_exif(image, ctx)
 
-    image = image.convert('RGB')
+    # image = image.convert('RGB')
     ctx.image = image
     if serving_hook.caption_type == serving_hook.IMAGE_CAPTIONING:
         preprocessed = serving_hook.load_image(image)
@@ -243,7 +249,9 @@ def preprocess_detection(inputs, ctx, **kwargs):
 
     ctx.np_image = np.array(image)
 
-    data = image.resize((300, 300), Image.ANTIALIAS)
+    data = cv2.resize(image, (300, 300), interpolation=cv2.INTER_LANCZOS4)
+    # data = image.resize((300, 300), Image.ANTIALIAS)
+    ctx.pose_image = data
     data = np.array(data).transpose([2, 0, 1]).reshape(1, 3, 300, 300)
     # convert to BGR
     data = data[:, ::-1, :, :]
@@ -253,13 +261,17 @@ def preprocess_detection(inputs, ctx, **kwargs):
     LOG.info('preprocess detection: %.3fms' % ((time.time() - t) * 1000))
     ctx.t = time.time()
 
-    return {input_key: [ctx.np_image]}
+    if ctx.detect_objects:
+        return {input_key: [ctx.np_image]}
+    else:
+        return {input_key: np.zeros([1, 10, 10, 3]), 'ml-serving-ignore': True}
 
 
 def preprocess_poses(inputs, ctx):
     ctx.t = time.time()
     if ctx.detect_poses:
-        return {'inputs': [ctx.np_image]}
+        # return {'inputs': [ctx.np_image]}
+        return {'inputs': [ctx.pose_image]}
     else:
         return {'inputs': np.zeros([1, 10, 10, 3]), 'ml-serving-ignore': True}
 
@@ -330,21 +342,24 @@ def get_emotion_output(image, face_boxes):
     if len(face_boxes) == 0:
         return {}
 
+    w = image.shape[1]
+    h = image.shape[0]
     input_name = list(emotion_serving.inputs.keys())[0]
 
     input_images = np.zeros([len(face_boxes), 3, 64, 64])
     boxes = np.copy(face_boxes)
-    boxes[:, 0] = boxes[:, 0] * image.width
-    boxes[:, 2] = boxes[:, 2] * image.width
-    boxes[:, 1] = boxes[:, 1] * image.height
-    boxes[:, 3] = boxes[:, 3] * image.height
+    boxes[:, 0] = boxes[:, 0] * w
+    boxes[:, 2] = boxes[:, 2] * w
+    boxes[:, 1] = boxes[:, 1] * h
+    boxes[:, 3] = boxes[:, 3] * h
     for i, box in enumerate(boxes):
-        xmin = box[0]
-        ymin = box[1]
-        xmax = box[2]
-        ymax = box[3]
+        xmin = int(box[0])
+        ymin = int(box[1])
+        xmax = int(box[2])
+        ymax = int(box[3])
         # Crop
-        resized = image.crop((xmin, ymin, xmax, ymax)).resize((64, 64))
+        resized = cv2.resize(image[ymin:ymax, xmin:xmax], (64, 64), interpolation=cv2.INTER_LANCZOS4)
+        # resized = image.crop((xmin, ymin, xmax, ymax)).resize((64, 64))
         input_images[i] = np.array(resized).transpose([2, 0, 1])
 
     # Convert to BGR
@@ -460,21 +475,8 @@ def postprocess_poses(outputs, ctx):
 
 
 def image_output(ctx, result, params):
-    if ctx.detect_objects:
-        vis_utils.visualize_boxes_and_labels_on_image(
-            ctx.image,
-            result['detection_boxes'],
-            result['detection_classes'],
-            result['detection_scores'],
-            None,
-            use_normalized_coordinates=True,
-            max_boxes_to_draw=params['max_boxes'],
-            min_score_thresh=params['threshold'],
-            agnostic_mode=False,
-            line_thickness=params['line_thickness'],
-            skip_labels=False,
-            skip_scores=False,
-        )
+    t = time.time()
+
     if ctx.detect_poses:
         vis_utils.visualize_boxes_and_labels_on_image(
             ctx.image,
@@ -490,6 +492,23 @@ def image_output(ctx, result, params):
             skip_labels=False,
             skip_scores=False,
         )
+
+    if ctx.detect_objects:
+        vis_utils.visualize_boxes_and_labels_on_image(
+            ctx.image,
+            result['detection_boxes'],
+            result['detection_classes'],
+            result['detection_scores'],
+            None,
+            use_normalized_coordinates=True,
+            max_boxes_to_draw=params['max_boxes'],
+            min_score_thresh=params['threshold'],
+            agnostic_mode=False,
+            line_thickness=params['line_thickness'],
+            skip_labels=False,
+            skip_scores=False,
+        )
+
     if ctx.detect_faces and len(result.get('face_boxes', [])) > 0:
         face_boxes = result['face_boxes']
         emotion_max = result['emotion_max']
@@ -502,7 +521,7 @@ def image_output(ctx, result, params):
                 box[0],
                 box[3],
                 box[2],
-                color=(250, 0, 250),
+                color='Magenta',
                 thickness=params['line_thickness'],
                 display_str_list=(display_str,),
                 use_normalized_coordinates=True,
@@ -512,9 +531,14 @@ def image_output(ctx, result, params):
         if result['captions']:
             ctx.image = serving_hook.montage_caption(ctx.image, result['captions'][0])
 
-    image_bytes = io.BytesIO()
-    ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
-    return {'output': image_bytes.getvalue(), 'table_output': result_table_string(result, ctx)}
+    # image_bytes = io.BytesIO()
+    # ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+    ctx.image = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2RGB)
+    image_bytes = cv2.imencode(".jpg", ctx.image, params=[cv2.IMWRITE_JPEG_QUALITY, 95])[1].tostring()
+
+    LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
+
+    return {'output': image_bytes, 'table_output': result_table_string(result, ctx)}
 
 
 preprocess = [

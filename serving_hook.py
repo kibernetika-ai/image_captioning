@@ -2,6 +2,11 @@ import io
 import logging
 from os import path
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 import numpy as np
 from PIL import Image
 from PIL import ImageDraw
@@ -204,20 +209,66 @@ def get_caption_output(ctx):
 
 
 def montage_caption(image, caption):
-    w = image.size[0]
-    h = image.size[1]
+    use_pil = False
+    if isinstance(image, Image.Image):
+        use_pil = True
+        w = image.size[0]
+        h = image.size[1]
+    else:
+        w = image.shape[1]
+        h = image.shape[0]
     expanding = h // 8
-    montage = Image.new(mode='RGBA', size=(w, h + expanding), color='white')
 
-    montage.paste(image, (0, expanding))
-    draw = ImageDraw.Draw(montage)
+    if use_pil:
+        montage = Image.new(mode='RGBA', size=(w, h + expanding), color='white')
 
-    font = get_font(w, h, caption)
-    text_size = font.getsize(caption)
+        montage.paste(Image.fromarray(image), (0, expanding))
+        draw = ImageDraw.Draw(montage)
+        font = get_font(w, h, caption)
+
+        text_size = font.getsize(caption)
+    else:
+        up = np.ones([expanding, w, 3], dtype=np.uint8) * 255
+        montage = np.vstack([up, image])
+        font = cv2.FONT_HERSHEY_TRIPLEX
+
+        size = 5.0
+        size_found = False
+        padding = w // 25
+        expanding = h // 8
+
+        font_scale = size
+        font_thickness = 1
+        while not size_found:
+            size_t = cv2.getTextSize(caption, font, font_scale, font_thickness)
+            x, y = size_t[0][0], size_t[0][1]
+            if x <= w - padding * 2 and y <= expanding - h // 25:
+                break
+            size -= 0.02
+            font_scale = size
+        print('Set font scale to %.3f.' % size)
+
+        size = cv2.getTextSize(caption, font, font_scale, font_thickness)
+        text_size = size[0][0], size[0][1]
+
     text_x = (w - text_size[0]) // 2
     text_y = (expanding - text_size[1]) // 2
     text_xy = (text_x, text_y)
-    draw.text(text_xy, caption, font=font, fill='black')
+
+    if use_pil:
+        draw.text(text_xy, caption, font=font, fill='black')
+    else:
+        text_xy = (text_xy[0], text_xy[1] + text_size[1])
+        font_thickness = int(np.ceil(font_scale))
+        cv2.putText(
+            montage,
+            caption,
+            text_xy,
+            font, font_scale,
+            color=(0, 0, 0),
+            thickness=font_thickness,
+            lineType=cv2.LINE_AA,
+        )
 
     return montage
 
