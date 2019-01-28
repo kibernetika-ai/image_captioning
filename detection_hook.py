@@ -340,15 +340,15 @@ def get_emotion_output(image, face_boxes):
 
     input_images = np.zeros([len(face_boxes), 3, 64, 64])
     boxes = np.copy(face_boxes)
-    boxes[:, 0] = boxes[:, 0] * image.width
-    boxes[:, 2] = boxes[:, 2] * image.width
-    boxes[:, 1] = boxes[:, 1] * image.height
-    boxes[:, 3] = boxes[:, 3] * image.height
+    boxes[:, 0] = boxes[:, 0] * image.height
+    boxes[:, 2] = boxes[:, 2] * image.height
+    boxes[:, 1] = boxes[:, 1] * image.width
+    boxes[:, 3] = boxes[:, 3] * image.width
     for i, box in enumerate(boxes):
-        xmin = box[0]
-        ymin = box[1]
-        xmax = box[2]
-        ymax = box[3]
+        ymin = box[0]
+        xmin = box[1]
+        ymax = box[2]
+        xmax = box[3]
         # Crop
         resized = image.crop((xmin, ymin, xmax, ymax)).resize((64, 64))
         input_images[i] = np.array(resized).transpose([2, 0, 1])
@@ -419,6 +419,38 @@ def postprocess_detection(outputs, ctx):
     return result
 
 
+def image_resize(image, width=None, height=None, inter=Image.ANTIALIAS):
+    # initialize the dimensions of the image to be resized and
+    # grab the image size
+    dim = None
+    (h, w) = image.height, image.width
+
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
+
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
+
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = image.resize(dim, inter)
+
+    # return the resized image
+    return resized
+
+
 def result_table_string(result_dict, ctx):
     table = []
 
@@ -430,6 +462,7 @@ def result_table_string(result_dict, ctx):
             top, bottom = top * ctx.image.height, bottom * ctx.image.height
 
         cropped = ctx.image.crop((left, top, right, bottom))
+        cropped = image_resize(cropped, width=256)
         image_bytes = io.BytesIO()
         cropped.convert('RGB').save(image_bytes, format='JPEG', quality=80)
 
