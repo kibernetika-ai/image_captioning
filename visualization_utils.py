@@ -203,7 +203,7 @@ def draw_bounding_box_on_image(image,
         display_str_heights = [font.getsize(ds)[1] for ds in display_str_list]
     else:
         font = cv2.FONT_HERSHEY_TRIPLEX
-        font_scale = 0.8
+        font_scale = 0.7
         font_thickness = 1
         display_str_heights = [cv2.getTextSize(ds, font, font_scale, font_thickness)[1] for ds in display_str_list]
     # If the total height of the display strings added to the top of the bounding
