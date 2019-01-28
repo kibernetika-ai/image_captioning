@@ -670,6 +670,9 @@ def visualize_boxes_and_labels_on_image(
   Returns:
     uint8 numpy array with shape (img_height, img_width, 3) with overlaid boxes.
   """
+    boxes = boxes[::-1]
+    scores = scores[::-1]
+    classes = classes[::-1]
     # Create a display string (and color) for every box location, group any boxes
     # that correspond to the same location.
     unique_classes = list(sorted(set(classes)))
