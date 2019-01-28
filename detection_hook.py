@@ -19,11 +19,11 @@ PARAMS = {
     'vocabulary-file': 'vocabulary.csv',
     'vocabulary-size': 5000,
     'max_boxes': 50,
-    'threshold': 0.49,
+    'threshold': 0.33,
     'label_map': '',
     'pose_label_map': '',
     'face_model': '',
-    'face_threshold': 0.49,
+    'face_threshold': 0.45,
     'pose_threshold': 0.49,
     'remote_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
@@ -541,21 +541,6 @@ def image_output(ctx, result, params):
 
     table_string = result_table_string(result, ctx)
 
-    if ctx.detect_objects:
-        vis_utils.visualize_boxes_and_labels_on_image(
-            ctx.image,
-            result['detection_boxes'],
-            result['detection_classes'],
-            result['detection_scores'],
-            None,
-            use_normalized_coordinates=True,
-            max_boxes_to_draw=params['max_boxes'],
-            min_score_thresh=params['threshold'],
-            agnostic_mode=False,
-            line_thickness=params['line_thickness'],
-            skip_labels=False,
-            skip_scores=False,
-        )
     if ctx.detect_poses:
         vis_utils.visualize_boxes_and_labels_on_image(
             ctx.image,
@@ -571,6 +556,23 @@ def image_output(ctx, result, params):
             skip_labels=False,
             skip_scores=False,
         )
+
+    if ctx.detect_objects:
+        vis_utils.visualize_boxes_and_labels_on_image(
+            ctx.image,
+            result['detection_boxes'],
+            result['detection_classes'],
+            result['detection_scores'],
+            None,
+            use_normalized_coordinates=True,
+            max_boxes_to_draw=params['max_boxes'],
+            min_score_thresh=params['threshold'],
+            agnostic_mode=False,
+            line_thickness=params['line_thickness'],
+            skip_labels=False,
+            skip_scores=False,
+        )
+
     if ctx.detect_faces and len(result.get('face_boxes', [])) > 0:
         face_boxes = result['face_boxes']
         emotion_max = result['emotion_max']
