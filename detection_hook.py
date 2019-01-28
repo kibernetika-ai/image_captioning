@@ -237,6 +237,7 @@ def preprocess_detection(inputs, ctx, **kwargs):
     ctx.raw_image = image[0]
     image = cv2.imdecode(np.fromstring(image[0], np.uint8), cv2.IMREAD_COLOR)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
     # image = Image.open(io.BytesIO(image[0]))
 
     # Rotate if exif tags specified
@@ -352,15 +353,15 @@ def get_emotion_output(image, face_boxes):
 
     input_images = np.zeros([len(face_boxes), 3, 64, 64])
     boxes = np.copy(face_boxes)
-    boxes[:, 0] = boxes[:, 0] * w
-    boxes[:, 2] = boxes[:, 2] * w
-    boxes[:, 1] = boxes[:, 1] * h
-    boxes[:, 3] = boxes[:, 3] * h
+    boxes[:, 0] = boxes[:, 0] * h
+    boxes[:, 1] = boxes[:, 1] * w
+    boxes[:, 2] = boxes[:, 2] * h
+    boxes[:, 3] = boxes[:, 3] * w
     for i, box in enumerate(boxes):
-        xmin = int(box[0])
-        ymin = int(box[1])
-        xmax = int(box[2])
-        ymax = int(box[3])
+        ymin = int(box[0])
+        xmin = int(box[1])
+        ymax = int(box[2])
+        xmax = int(box[3])
         # Crop
         resized = cv2.resize(image[ymin:ymax, xmin:xmax], (64, 64), interpolation=cv2.INTER_LANCZOS4)
         # resized = image.crop((xmin, ymin, xmax, ymax)).resize((64, 64))
@@ -432,21 +433,56 @@ def postprocess_detection(outputs, ctx):
     return result
 
 
+def image_resize(image, width=None, height=None, inter=cv2.INTER_AREA):
+    # initialize the dimensions of the image to be resized and
+    # grab the image size
+    dim = None
+    (h, w) = image.shape[:2]
+
+    # if both the width and height are None, then return the
+    # original image
+    if width is None and height is None:
+        return image
+
+    # check to see if the width is None
+    if width is None:
+        # calculate the ratio of the height and construct the
+        # dimensions
+        r = height / float(h)
+        dim = (int(w * r), height)
+
+    # otherwise, the height is None
+    else:
+        # calculate the ratio of the width and construct the
+        # dimensions
+        r = width / float(w)
+        dim = (width, int(h * r))
+
+    # resize the image
+    resized = cv2.resize(image, dim, interpolation = inter)
+
+    # return the resized image
+    return resized
+
+
 def result_table_string(result_dict, ctx):
     table = []
 
     def crop_from_box(box, normalized_coordinates=True):
+        w = ctx.image.shape[1]
+        h = ctx.image.shape[0]
         left, right = box[1], box[3]
         top, bottom = box[0], box[2]
         if normalized_coordinates:
-            left, right = left * ctx.image.width, right * ctx.image.width
-            top, bottom = top * ctx.image.height, bottom * ctx.image.height
+            left, right = left * w, right * w
+            top, bottom = top * h, bottom * h
 
-        cropped = ctx.image.crop((left, top, right, bottom))
-        image_bytes = io.BytesIO()
-        cropped.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+        cropped = ctx.image[int(top):int(bottom), int(left):int(right)]
+        cropped = image_resize(cropped, width=256)
+        cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+        image_bytes = cv2.imencode(".jpg", cropped)[1].tostring()
 
-        return image_bytes.getvalue()
+        return image_bytes
 
     def append(type_, name, prob, image):
         encoded = image
