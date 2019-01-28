@@ -431,7 +431,7 @@ def result_table_string(result_dict, ctx):
 
     if ctx.build_caption:
         for caption in result_dict['captions']:
-            append('caption', caption, 0.1)
+            append('caption', caption, 0.5)
 
     if ctx.detect_faces and len(result_dict.get('face_boxes', [])) > 0:
         for prob in result_dict['face_scores']:
