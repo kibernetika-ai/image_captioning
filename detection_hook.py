@@ -18,12 +18,12 @@ PARAMS = {
     'vocabulary-file': 'vocabulary.csv',
     'vocabulary-size': 5000,
     'max_boxes': 50,
-    'threshold': 0.2,
+    'threshold': 0.49,
     'label_map': '',
     'pose_label_map': '',
     'face_model': '',
-    'face_threshold': 0.3,
-    'pose_threshold': 0.5,
+    'face_threshold': 0.49,
+    'pose_threshold': 0.49,
     'remote_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
     'line_thickness': 4,
