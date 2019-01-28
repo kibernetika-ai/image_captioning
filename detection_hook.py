@@ -432,6 +432,8 @@ def image_resize(image, width=None, height=None, inter=Image.ANTIALIAS):
 
     # check to see if the width is None
     if width is None:
+        if h < height:
+            return image
         # calculate the ratio of the height and construct the
         # dimensions
         r = height / float(h)
@@ -439,6 +441,8 @@ def image_resize(image, width=None, height=None, inter=Image.ANTIALIAS):
 
     # otherwise, the height is None
     else:
+        if w < width:
+            return image
         # calculate the ratio of the width and construct the
         # dimensions
         r = width / float(w)
