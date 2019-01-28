@@ -145,12 +145,26 @@ def load_image(image):
     return image
 
 
+def prepare_caption_image(image):
+    # Resize
+    caption_image = cv2.resize(image, (346, 346), interpolation=cv2.INTER_LANCZOS4)
+
+    # Crop
+    caption_image = caption_image[23:322, 23:322]
+
+    # normalize
+    caption_image = caption_image.astype(np.float32) / 255.0
+    caption_image = (caption_image - 0.5) * 2.0
+
+    return caption_image.reshape(1, *caption_image.shape)
+
+
 def preprocess(inputs, ctx):
     image = inputs.get('input')
     if image is None:
         raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
 
-    ctx.raw_image = image[0]
+    # ctx.caption_image = image[0]
     image = Image.open(io.BytesIO(image[0]))
     image = image.convert('RGB')
     ctx.image = image
@@ -158,6 +172,8 @@ def preprocess(inputs, ctx):
     if caption_type == IMAGE_CAPTIONING:
         image = load_image(image)
         ctx.caption_image = np.array(image, np.float32)
+    else:
+        ctx.caption_image = prepare_caption_image(np.array(image))
 
     return {'fake': 'fake'}
 
@@ -182,7 +198,7 @@ def get_font(w, h, text):
         return ImageFont.load_default()
 
 
-def get_caption_output(ctx):
+def get_caption_output(ctx, array=False):
     if caption_generator is None:
         return {}
 
@@ -196,7 +212,7 @@ def get_caption_output(ctx):
         caption = vocabulary.get_sentence(word_idxs)
         captions.append(caption)
     elif caption_type == IM_2TXT:
-        raw_captions = caption_generator.beam_search(session, ctx.raw_image)
+        raw_captions = caption_generator.beam_search(session, ctx.caption_image, array=array)
         for i, caption in enumerate(raw_captions):
             # Ignore begin and end words.
             sentence = [vocabulary.id_to_word(w) for w in caption.sentence[1:-1]]
@@ -274,7 +290,7 @@ def montage_caption(image, caption):
 
 
 def postprocess(outputs, ctx):
-    result = get_caption_output(ctx)
+    result = get_caption_output(ctx, array=True)
 
     montage = montage_caption(ctx.image, result['captions'][0])
 

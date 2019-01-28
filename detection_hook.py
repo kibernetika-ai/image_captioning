@@ -234,25 +234,19 @@ def preprocess_detection(inputs, ctx, **kwargs):
     else:
         ctx.output_type = PARAMS['output_type']
 
-    ctx.raw_image = image[0]
     image = cv2.imdecode(np.fromstring(image[0], np.uint8), cv2.IMREAD_COLOR)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    # image = Image.open(io.BytesIO(image[0]))
-
-    # Rotate if exif tags specified
-    # image = rotate_by_exif(image, ctx)
-
-    # image = image.convert('RGB')
     ctx.image = image
     if serving_hook.caption_type == serving_hook.IMAGE_CAPTIONING:
         preprocessed = serving_hook.load_image(image)
         ctx.caption_image = np.array(preprocessed, np.float32)
+    else:
+        ctx.caption_image = serving_hook.prepare_caption_image(image)
 
     ctx.np_image = np.array(image)
 
     data = cv2.resize(image, (300, 300), interpolation=cv2.INTER_LANCZOS4)
-    # data = image.resize((300, 300), Image.ANTIALIAS)
     ctx.pose_image = data
     data = np.array(data).transpose([2, 0, 1]).reshape(1, 3, 300, 300)
     # convert to BGR
@@ -405,7 +399,7 @@ def postprocess_detection(outputs, ctx):
     def process():
         if ctx.build_caption:
             t = time.time()
-            caption_out = serving_hook.get_caption_output(ctx)
+            caption_out = serving_hook.get_caption_output(ctx, array=True)
             result.update(caption_out)
 
             LOG.info('build caption: %.3fms' % ((time.time() - t) * 1000))
@@ -607,12 +601,12 @@ def image_output(ctx, result, params):
         if result['captions']:
             ctx.image = serving_hook.montage_caption(ctx.image, result['captions'][0])
 
-        # image_bytes = io.BytesIO()
-        # ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
-        ctx.image = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2RGB)
-        image_bytes = cv2.imencode(".jpg", ctx.image, params=[cv2.IMWRITE_JPEG_QUALITY, 95])[1].tostring()
+    # image_bytes = io.BytesIO()
+    # ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+    ctx.image = cv2.cvtColor(ctx.image, cv2.COLOR_RGB2BGR)
+    image_bytes = cv2.imencode(".jpg", ctx.image, params=[cv2.IMWRITE_JPEG_QUALITY, 95])[1].tostring()
 
-        LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
+    LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
 
     return {'output': image_bytes, 'table_output': table_string}
 
