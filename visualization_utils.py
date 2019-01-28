@@ -679,7 +679,7 @@ def visualize_boxes_and_labels_on_image(
     class_index = [unique_classes.index(i) + 1 for i in classes]
 
     box_to_display_str_map = collections.defaultdict(list)
-    box_to_color_map = collections.defaultdict(str)
+    box_to_color_map = collections.OrderedDict()
     box_to_instance_masks_map = {}
     box_to_instance_boundaries_map = {}
     box_to_keypoints_map = collections.defaultdict(list)
