@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import logging
@@ -319,6 +320,9 @@ def get_face_output(outputs, ctx):
 
     scores = bboxes_raw[:, 2]
     boxes = bboxes_raw[:, 3:7]
+    boxes_copy = np.copy(boxes)
+    boxes[:, 0], boxes[:, 1] = boxes_copy[:, 1], boxes_copy[:, 0]
+    boxes[:, 2], boxes[:, 3] = boxes_copy[:, 3], boxes_copy[:, 2]
 
     return {
         'face_boxes': boxes,
@@ -431,29 +435,63 @@ def postprocess_detection(outputs, ctx):
 def result_table_string(result_dict, ctx):
     table = []
 
-    def append(type_, name, prob):
-        table.append({'type': type_, 'name': name, 'prob': float(prob)})
+    def crop_from_box(box, normalized_coordinates=True):
+        left, right = box[1], box[3]
+        top, bottom = box[0], box[2]
+        if normalized_coordinates:
+            left, right = left * ctx.image.width, right * ctx.image.width
+            top, bottom = top * ctx.image.height, bottom * ctx.image.height
+
+        cropped = ctx.image.crop((left, top, right, bottom))
+        image_bytes = io.BytesIO()
+        cropped.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+
+        return image_bytes.getvalue()
+
+    def append(type_, name, prob, image):
+        encoded = image
+        if image is not None:
+            encoded = base64.encodebytes(image).decode()
+
+        table.append(
+            {
+                'type': type_,
+                'name': name,
+                'prob': float(prob),
+                'image': encoded
+            }
+        )
 
     if ctx.detect_objects:
-        for name, prob in zip(result_dict['detection_classes'], result_dict['detection_scores']):
-            append('object', name, prob)
+        zipped = zip(
+            result_dict['detection_classes'],
+            result_dict['detection_scores'],
+            result_dict['detection_boxes']
+        )
+        for name, prob, box in zipped:
+            append('object', name, prob, crop_from_box(box))
 
     if ctx.detect_poses:
-        for name, prob in zip(result_dict['pose_classes'], result_dict['pose_scores']):
-            append('pose', name, prob)
+        zipped = zip(
+            result_dict['pose_classes'],
+            result_dict['pose_scores'],
+            result_dict['pose_boxes']
+        )
+        for name, prob, box in zipped:
+            append('pose', name, prob, crop_from_box(box))
 
     if ctx.build_caption:
         for caption in result_dict['captions']:
-            append('caption', caption, 0.5)
+            append('caption', caption, 0.5, None)
 
     if ctx.detect_faces and len(result_dict.get('face_boxes', [])) > 0:
-        for prob in result_dict['face_scores']:
-            append('face', 'face', prob)
+        for prob, box in zip(result_dict['face_scores'], result_dict['face_boxes']):
+            append('face', 'face', prob, crop_from_box(box))
 
         emotion_max = result_dict['emotion_max']
         emotion_prob = result_dict['emotion_prob']
-        for i, _ in enumerate(result_dict['face_boxes']):
-            append('emotion', emotion_max[i], max(emotion_prob[i]))
+        for i, box in enumerate(result_dict['face_boxes']):
+            append('emotion', emotion_max[i], max(emotion_prob[i]), crop_from_box(box))
 
     return json.dumps(table)
 
@@ -476,6 +514,8 @@ def postprocess_poses(outputs, ctx):
 
 def image_output(ctx, result, params):
     t = time.time()
+
+    table_string = result_table_string(result, ctx)
 
     if ctx.detect_poses:
         vis_utils.visualize_boxes_and_labels_on_image(
@@ -517,10 +557,10 @@ def image_output(ctx, result, params):
             display_str = '%s: %d%%' % (emotion_max[i], int(max(emotion_prob[i]) * 100))
             vis_utils.draw_bounding_box_on_image(
                 ctx.image,
-                box[1],
                 box[0],
-                box[3],
+                box[1],
                 box[2],
+                box[3],
                 color='Magenta',
                 thickness=params['line_thickness'],
                 display_str_list=(display_str,),
@@ -531,14 +571,14 @@ def image_output(ctx, result, params):
         if result['captions']:
             ctx.image = serving_hook.montage_caption(ctx.image, result['captions'][0])
 
-    # image_bytes = io.BytesIO()
-    # ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
-    ctx.image = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2RGB)
-    image_bytes = cv2.imencode(".jpg", ctx.image, params=[cv2.IMWRITE_JPEG_QUALITY, 95])[1].tostring()
+        # image_bytes = io.BytesIO()
+        # ctx.image.convert('RGB').save(image_bytes, format='JPEG', quality=80)
+        ctx.image = cv2.cvtColor(ctx.image, cv2.COLOR_BGR2RGB)
+        image_bytes = cv2.imencode(".jpg", ctx.image, params=[cv2.IMWRITE_JPEG_QUALITY, 95])[1].tostring()
 
-    LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
+        LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
 
-    return {'output': image_bytes, 'table_output': result_table_string(result, ctx)}
+    return {'output': image_bytes, 'table_output': table_string}
 
 
 preprocess = [
