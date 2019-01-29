@@ -31,6 +31,7 @@ PARAMS = {
     'line_thickness': 4,
     # /opt/intel/computer_vision_sdk/deployment_tools/intel_models/emotions-recognition-retail-0003/FP32/emotions-recognition-retail-0003.xml
     'emotion_model': '',
+    'draw_caption': False,
 }
 session = None
 caption_generator = None
@@ -58,6 +59,9 @@ def init_hook(**params):
 
 def caption_init(**params):
     serving_hook.init_hook(**params)
+
+    if params.get('draw_caption') is not None:
+        PARAMS['draw_caption'] = str(params['draw_caption']).lower() == 'true'
 
 
 def detection_init(**params):
@@ -539,6 +543,7 @@ def postprocess_poses(outputs, ctx):
         return image_output(ctx, result, PARAMS)
 
     result['table_output'] = result_table_string(result, ctx)
+    result['caption_output'] = result.get('captions', [])
     return result
 
 
@@ -597,7 +602,7 @@ def image_output(ctx, result, params):
                 use_normalized_coordinates=True,
             )
 
-    if ctx.build_caption:
+    if ctx.build_caption and PARAMS['draw_caption']:
         if result['captions']:
             ctx.image = serving_hook.montage_caption(ctx.image, result['captions'][0])
 
@@ -608,7 +613,11 @@ def image_output(ctx, result, params):
 
     LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
 
-    return {'output': image_bytes, 'table_output': table_string}
+    return {
+        'output': image_bytes,
+        'table_output': table_string,
+        'caption_output': result.get('captions', [])
+    }
 
 
 preprocess = [
