@@ -23,7 +23,7 @@ PARAMS = {
     'label_map': '',
     'pose_label_map': '',
     'face_model': '',
-    'face_threshold': 0.45,
+    'face_threshold': 0.46,
     'pose_threshold': 0.49,
     'remote_serving_addr': '',  # host:port
     'output_type': 'boxes',  # Or 'image'
