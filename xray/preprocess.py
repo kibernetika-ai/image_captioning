@@ -14,6 +14,8 @@ from tensorflow.contrib.slim.python.slim.nets import inception_v3
 
 slim = tf.contrib.slim
 nltk.download('punkt')
+tf.logging.set_verbosity(tf.logging.INFO)
+log = tf.logging
 
 
 def _inception_v3_arg_scope(is_training=True,
@@ -112,8 +114,8 @@ if __name__ == '__main__':
         desc_count += len(row_descriptions)
         descriptions = descriptions.union(row_descriptions)
 
-    print('all descriptions variants num: %s' % len(descriptions))
-    print('average description count per row: %.2f' % (desc_count / len(data)))
+    log.info('all descriptions variants num: %s' % len(descriptions))
+    log.info('average description count per row: %.2f' % (desc_count / len(data)))
 
     # Save to files
     all_annotations = {'annotations': annotations}
@@ -127,6 +129,8 @@ if __name__ == '__main__':
     with open(os.path.join(args.output, 'label_map.json'), 'w') as f:
         f.write(json.dumps(label_map, indent=2, ensure_ascii=False))
 
+    log.info('Written annotations and label map to %s' % args.output)
+
     file = tf.placeholder(tf.string, shape=None, name='file')
     image_data = tf.io.read_file(file)
     img = tf.image.decode_png(image_data, channels=3)
@@ -136,7 +140,6 @@ if __name__ == '__main__':
 
     inception_variables_dict = {var.op.name: var for var in slim.get_model_variables('InceptionV3')}
     init_fn_inception = slim.assign_from_checkpoint_fn(args.inception_path, inception_variables_dict)
-
 
     with tf.Session() as sess:
         init_fn_inception(sess)
