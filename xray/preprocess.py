@@ -118,6 +118,9 @@ if __name__ == '__main__':
     # Save to files
     all_annotations = {'annotations': annotations}
 
+    if not tf.gfile.Exists(args.output + '/images'):
+        tf.gfile.MakeDirs(args.output + '/images')
+
     with open(os.path.join(args.output, 'annotations.json'), 'w') as f:
         f.write(json.dumps(all_annotations, indent=2))
 
@@ -133,8 +136,7 @@ if __name__ == '__main__':
 
     inception_variables_dict = {var.op.name: var for var in slim.get_model_variables('InceptionV3')}
     init_fn_inception = slim.assign_from_checkpoint_fn(args.inception_path, inception_variables_dict)
-    if not tf.gfile.Exists(args.output + '/images'):
-        tf.gfile.MakeDirs(args.output + '/images')
+
 
     with tf.Session() as sess:
         init_fn_inception(sess)
