@@ -118,10 +118,10 @@ if __name__ == '__main__':
     # Save to files
     all_annotations = {'annotations': annotations}
 
-    with open('/notebooks/all_annotations.json', 'w') as f:
+    with open(os.path.join(args.output, 'annotations.json'), 'w') as f:
         f.write(json.dumps(all_annotations, indent=2))
 
-    with open('/notebooks/label_map.json', 'w') as f:
+    with open(os.path.join(args.output, 'label_map.json'), 'w') as f:
         f.write(json.dumps(label_map, indent=2, ensure_ascii=False))
 
     file = tf.placeholder(tf.string, shape=None, name='file')
@@ -144,4 +144,4 @@ if __name__ == '__main__':
                 {file: args.data_dir+'/images/'+annot['image_name']}
             )
             name = os.path.basename(f)
-            np.save(args.output + '/processed/' + name, res[0][0])
+            np.save(args.output + '/images/' + name, res[0][0])
