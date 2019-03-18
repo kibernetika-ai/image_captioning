@@ -148,5 +148,5 @@ if __name__ == '__main__':
                 [net],
                 {file: args.data_dir+'/images/'+annot['image_name']}
             )
-            name = os.path.basename(f)
+            name = os.path.basename(annot['image_name'])
             np.save(args.output + '/images/' + name, res[0][0])
