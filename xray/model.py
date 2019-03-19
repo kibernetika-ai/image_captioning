@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import slim
+from tensorflow.python.keras.backend import sparse_categorical_crossentropy
 from tensorflow.python.training import session_run_hook
 
 from xray import inception
@@ -15,7 +16,8 @@ const = tf.saved_model.signature_constants
 
 def loss_function(real, pred):
     mask = tf.math.logical_not(tf.math.equal(real, 0))
-    loss_ = tf.keras.losses.sparse_categorical_crossentropy(real, pred)
+    loss_ = sparse_categorical_crossentropy(real, pred, from_logits=True)
+    # loss_ = tf.keras.losses.sparse_categorical_crossentropy(real, pred)
 
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
@@ -136,23 +138,42 @@ def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
     dec_input = tf.expand_dims([word_index['<start>']] * params['batch_size'], 1)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
-        with tf.GradientTape() as tape:
-            features = encoder(img)
+        features = encoder(img)
 
-            for i in range(1, labels.shape[1]):
-                # passing the features through the decoder
-                predictions, hidden, _ = decoder(dec_input, features=features, hidden=hidden)
-                loss += loss_function(labels[:, i], predictions)
-                # using teacher forcing
-                dec_input = tf.expand_dims(labels[:, i], 1)
+        for i in range(0, labels.shape[1]):
+            # passing the features through the decoder
+            predictions, hidden, _ = decoder(dec_input, features=features, hidden=hidden)
+            loss += loss_function(labels[:, i], predictions)
+            # using teacher forcing
+            dec_input = tf.expand_dims(labels[:, i], 1)
 
-        total_loss = (loss / int(labels.shape[1]))
-        trainable_variables = encoder.trainable_variables + decoder.trainable_variables
-        gradients = tape.gradient(loss, trainable_variables)
-        train_op = optimizer.apply_gradients(
-            zip(gradients, trainable_variables),
-            global_step=tf.train.get_or_create_global_step()
-        )
+        # total_loss = (loss / int(labels.shape[1]))
+        # trainable_variables = encoder.trainable_variables + decoder.trainable_variables
+        # gradients = tape.gradient(loss, trainable_variables)
+        # train_op = optimizer.apply_gradients(
+        #     zip(gradients, trainable_variables),
+        #     global_step=tf.train.get_or_create_global_step()
+        # )
+        if params.get('grad_clip') is None:
+            train_op = optimizer.minimize(loss, global_step=tf.train.get_or_create_global_step())
+        else:
+            gradients, variables = zip(*optimizer.compute_gradients(loss))
+            if not params.get('train_inception'):
+                grads = []
+                vars = []
+                for i, v in enumerate(variables):
+                    if not v.name.startswith('InceptionV3'):
+                        grads.append(gradients[i])
+                        vars.append(variables[i])
+
+                variables = vars
+                gradients = grads
+
+            gradients, _ = tf.clip_by_global_norm(gradients, params['grad_clip'])
+            train_op = optimizer.apply_gradients(
+                [(gradients[i], v) for i, v in enumerate(variables)],
+                global_step=tf.train.get_or_create_global_step()
+            )
         predictions = None
         export_outputs = None
     else:
@@ -190,7 +211,7 @@ def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
         mode=mode,
         eval_metric_ops=None,
         predictions=predictions,
-        loss=total_loss,
+        loss=loss,
         export_outputs=export_outputs,
         train_op=train_op,
         training_hooks=[IniInceptionHook(params['inception_path'])],

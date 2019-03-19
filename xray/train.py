@@ -97,6 +97,7 @@ def main():
         'embedding_size': 256,
         'units': 512,
         'limit_length': 10,
+        'grad_clip': 1.0,
         'learning_rate': args.learning_rate,
         'data_dir': args.data_dir,
         'inception_path': args.inception_path,
