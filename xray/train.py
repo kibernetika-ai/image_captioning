@@ -62,6 +62,8 @@ def parse_args():
     parser.add_argument('--inception-path', type=str, default='./inception_v3.ckpt', help='Inception checkpoint')
     parser.add_argument('--steps', type=int, default=1000, help='Training steps count')
     parser.add_argument('--learning-rate', type=float, default=0.0001, help='Learning rate')
+    parser.add_argument('--log-step-count-steps', type=int, default=5, help='Log every N step')
+    parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
     return parser.parse_args()
 
 
@@ -92,7 +94,7 @@ def export(train_dir, params):
 def main():
     args = parse_args()
     params = {
-        'batch_size': 4,
+        'batch_size': args.batch_size,
         'buffer_size': 1000,
         'embedding_size': 256,
         'units': 512,
@@ -104,7 +106,7 @@ def main():
         'vocab_size': 0,
         'attention_features_shape': 64,
         'features_shape': 2048,
-        'log_step_count_steps': 5,
+        'log_step_count_steps': args.log_step_count_steps,
         'keep_checkpoint_max': 5,
     }
 

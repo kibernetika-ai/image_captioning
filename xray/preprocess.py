@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from . import inception
+from xray import inception
 
 
 slim = tf.contrib.slim
@@ -62,7 +62,33 @@ if __name__ == '__main__':
     log.info('all descriptions variants num: %s' % len(descriptions))
     log.info('average description count per row: %.2f' % (desc_count / len(data)))
 
+    # Split up the annotations by groups
+    groups = set()
+    for annot in annotations:
+        group = annot['image_id'].split('.')[0]
+        groups.add(group)
+
+    split_n = len(groups) // 10
+    groups = list(groups)
+    train_groups = set(groups[:-split_n])
+    test_groups = set(groups[-split_n:])
+    print('Train groups: %s ' % len(train_groups))
+    print('Test groups: %s' % len(test_groups))
+
+    train_annotations = []
+    test_annotations = []
+    for annot in annotations:
+        group = annot['image_id'].split('.')[0]
+        if group in train_groups:
+            train_annotations.append(annot)
+        elif group in test_groups:
+            test_annotations.append(annot)
+
     # Save to files
+    print()
+    print('all annotations: %s' % len(annotations))
+    print('train annotations: %s' % len(train_annotations))
+    print('test annotations: %s' % len(test_annotations))
     all_annotations = {'annotations': annotations}
 
     if not tf.gfile.Exists(args.output + '/images'):
@@ -70,6 +96,12 @@ if __name__ == '__main__':
 
     with open(os.path.join(args.output, 'annotations.json'), 'w') as f:
         f.write(json.dumps(all_annotations, indent=2))
+
+    with open(os.path.join(args.output, 'train_annotations.json'), 'w') as f:
+        f.write(json.dumps({'annotations': train_annotations}, indent=2))
+
+    with open(os.path.join(args.output, 'test_annotations.json'), 'w') as f:
+        f.write(json.dumps({'annotations': test_annotations}, indent=2))
 
     with open(os.path.join(args.output, 'label_map.json'), 'w') as f:
         f.write(json.dumps(label_map, indent=2, ensure_ascii=False))
@@ -89,9 +121,11 @@ if __name__ == '__main__':
     with tf.Session() as sess:
         init_fn_inception(sess)
         for annot in annotations:
-            res = sess.run(
-                [net],
-                {file: args.data_dir+'/images/'+annot['image_name']}
-            )
+            path = os.path.join(args.data_dir, 'images', annot['image_name'])
+            if not os.path.exists(path):
+                # Skip
+                continue
+
+            res = sess.run([net], {file: path})
             name = os.path.basename(annot['image_name'])
             np.save(args.output + '/images/' + name, res[0][0])

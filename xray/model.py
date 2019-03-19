@@ -72,7 +72,7 @@ def input_fn(params, is_training=True):
         def generator():
             for annot in annotations['annotations']:
 
-                img_path = os.path.join(params['data_dir'], 'images', annot['image_name'])
+                img_path = os.path.join(params['data_dir'], 'images', annot['image_name'] + '.npy')
                 if not os.path.exists(img_path):
                     continue
 
@@ -84,16 +84,18 @@ def input_fn(params, is_training=True):
                 if len(tokens) < params['max_length']:
                     tokens.extend([word_index['<end>']] * (params['max_length'] - len(tokens)))
 
-                img = cv2.imread(img_path, cv2.IMREAD_COLOR)
-                img = img[:, :, ::-1]
-                img = cv2.resize(img, (299, 299))
+                img = np.load(img_path)
+                img = np.reshape(img, (64, 2048))
+                # img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+                # img = img[:, :, ::-1]
+                # img = cv2.resize(img, (299, 299))
 
                 yield (img, np.array(tokens, dtype=np.int32))
 
         ds = tf.data.Dataset.from_generator(
             generator,
             (tf.float32, tf.int32),
-            (tf.TensorShape([299, 299, 3]), tf.TensorShape([params['max_length']]))
+            (tf.TensorShape([64, 2048]), tf.TensorShape([params['max_length']]))
         ).prefetch(100)
 
         # shuffling and batching
@@ -102,7 +104,7 @@ def input_fn(params, is_training=True):
 
         ds = ds.padded_batch(
             batch_size,
-            padded_shapes=([299, 299, 3], [params['max_length']]),
+            padded_shapes=([64, 2048], [params['max_length']]),
             padding_values=(0.0, np.int32(end_token))
         )
         # dataset = dataset.prefetch(buffer_size=batch_size * 5)
@@ -113,14 +115,19 @@ def input_fn(params, is_training=True):
 
 
 def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
-    inputs = features
-    if isinstance(features, dict):
+    if mode == tf.estimator.ModeKeys.PREDICT:
         inputs = features['images']
+        inputs = tf.cast(inputs, tf.float32) / 127.5 - 1
+    else:
+        inputs = tf.zeros((params['batch_size'], 299, 299, 3))
 
-    img = tf.cast(inputs, tf.float32) / 127.5 - 1
-    img = inception.inception(img)
+    img = inception.inception(inputs)
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        img = tf.reshape(img, (params['batch_size'], 64, 2048))
+    else:
+        img = features
     # Reshape by inception outputs
-    img = tf.reshape(img, (-1, 64, 2048))
+    # img = tf.reshape(img, (-1, 64, 2048))
 
     encoder = CNN_Encoder(params['embedding_size'])
     decoder = RNN_Decoder(params['embedding_size'], params['units'], params['vocab_size'])
