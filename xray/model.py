@@ -92,7 +92,7 @@ def input_fn(params, is_training=True):
             generator,
             (tf.float32, tf.int32),
             (tf.TensorShape([299, 299, 3]), tf.TensorShape([params['max_length']]))
-        )
+        ).prefetch(100)
 
         # shuffling and batching
         if is_training:
