@@ -52,8 +52,6 @@ def preprocess(inputs, ctx):
 def postprocess(outputs, ctx):
     predictions = outputs['predictions']
     attentions = outputs['attention']
-    LOG.info('attentions: {}'.format(attentions.shape))
-
     captions = []
     # for i in predictions[0]:
     #     t = word_index.get(i, None)
@@ -100,6 +98,6 @@ def postprocess(outputs, ctx):
     img_base.save(image_bytes, format='PNG')
     return {
         'output': image_bytes.getvalue(),
-        #'caption_output': np.array(captions),
+        # 'caption_output': np.array(captions),
         'table_output': json.dumps(table),
     }
