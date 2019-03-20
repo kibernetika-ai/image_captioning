@@ -52,6 +52,9 @@ def preprocess(inputs, ctx):
 def postprocess(outputs, ctx):
     predictions = outputs['predictions']
     attentions = outputs['attention']
+    LOG.info('attentions: {}'.format(attentions.shape))
+    LOG.info('predictions: {}'.format(predictions.shape))
+
     captions = []
     # for i in predictions[0]:
     #     t = word_index.get(i, None)
@@ -78,7 +81,7 @@ def postprocess(outputs, ctx):
 
         captions.append(caption)
 
-        attention = np.resize(attentions[i][0], (8, 8)) * 255
+        attention = np.resize(attentions[0][i][0], (8, 8)) * 255
         image = Image.fromarray(attention.astype(np.uint8))
         image.putalpha(int(255 * 0.6))
         image = image.resize((299, 299))
@@ -98,6 +101,6 @@ def postprocess(outputs, ctx):
     img_base.save(image_bytes, format='PNG')
     return {
         'output': image_bytes.getvalue(),
-        # 'caption_output': np.array(captions),
+        #'caption_output': np.array(captions),
         'table_output': json.dumps(table),
     }
