@@ -115,15 +115,17 @@ def input_fn(params, is_training=True):
 
 
 def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
+    batch_size = params['batch_size']
+
     if mode == tf.estimator.ModeKeys.PREDICT:
         inputs = features['images']
         inputs = tf.cast(inputs, tf.float32) / 127.5 - 1
     else:
-        inputs = tf.zeros((params['batch_size'], 299, 299, 3))
+        inputs = tf.zeros((batch_size, 299, 299, 3))
 
     img = inception.inception(inputs)
     if mode == tf.estimator.ModeKeys.PREDICT:
-        img = tf.reshape(img, (params['batch_size'], 64, 2048))
+        img = tf.reshape(img, (batch_size, 64, 2048))
     else:
         img = features
     # Reshape by inception outputs
@@ -132,21 +134,18 @@ def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
     encoder = CNN_Encoder(params['embedding_size'])
     decoder = RNN_Decoder(params['embedding_size'], params['units'], params['vocab_size'])
 
-    optimizer = tf.train.AdamOptimizer(learning_rate=params['learning_rate'])
-
     loss = tf.constant(0, dtype=tf.float32)
 
     # initializing the hidden state for each batch
     # because the captions are not related from image to image
-    hidden = decoder.reset_state(batch_size=params['batch_size'])
+    hidden = decoder.reset_state(batch_size=batch_size)
 
     word_index = params['word_index']
 
-    dec_input = tf.expand_dims([word_index['<start>']] * params['batch_size'], 1)
+    dec_input = tf.expand_dims([word_index['<start>']] * batch_size, 1)
+    features = encoder(img)
 
-    if mode == tf.estimator.ModeKeys.TRAIN:
-        features = encoder(img)
-
+    if mode in {tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.EVAL}:
         for i in range(0, labels.shape[1]):
             # passing the features through the decoder
             predictions, hidden, _ = decoder(dec_input, features=features, hidden=hidden)
@@ -154,13 +153,7 @@ def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
             # using teacher forcing
             dec_input = tf.expand_dims(labels[:, i], 1)
 
-        # total_loss = (loss / int(labels.shape[1]))
-        # trainable_variables = encoder.trainable_variables + decoder.trainable_variables
-        # gradients = tape.gradient(loss, trainable_variables)
-        # train_op = optimizer.apply_gradients(
-        #     zip(gradients, trainable_variables),
-        #     global_step=tf.train.get_or_create_global_step()
-        # )
+        optimizer = tf.train.AdamOptimizer(learning_rate=params['learning_rate'])
         if params.get('grad_clip') is None:
             train_op = optimizer.minimize(loss, global_step=tf.train.get_or_create_global_step())
         else:
@@ -184,28 +177,44 @@ def model_fn(features, labels, mode, params=None, config=None, model_dir=None):
         predictions = None
         export_outputs = None
     else:
-        total_loss = None
         train_op = None
         max_length = params['max_length']
-        attention_plot = np.zeros((max_length, params['attention_features_shape']))
-        ids = tf.zeros((max_length,), dtype=tf.int32)
+        attention_feature_shape = params['attention_features_shape']
+        # attention_plot will be shaped [max_length, batch_size, feature_shape]
+        attention_plot = None
+        # ids will be shaped [max_length, batch_size]
+        ids = None
         for i in range(max_length):
             predictions, hidden, attention_weights = decoder(dec_input, features=features, hidden=hidden)
 
-            attention_plot[i] = tf.reshape(attention_weights, (-1,))
+            one_weight = tf.reshape(attention_weights, (1, batch_size, attention_feature_shape))
+            if attention_plot is not None:
+                attention_plot = tf.concat((attention_plot, one_weight), axis=0)
+            else:
+                attention_plot = tf.concat(one_weight, axis=0)
 
-            predicted_id = tf.argmax(predictions[0])
-            ids[i] = predicted_id
+            predicted_id = tf.argmax(predictions, axis=1)
+            predicted_ids = tf.reshape(predicted_id, (1, predicted_id.shape[0]))
+            if ids is not None:
+                ids = tf.concat((ids, predicted_ids), axis=0)
+            else:
+                ids = tf.concat(predicted_ids, axis=0)
             # result.append(tokenizer.index_word[predicted_id])
 
-            if word_index['<end>'] == predicted_id:
-                break
+            # if word_index['<end>'] == predicted_id:
+            #     break
             # if tokenizer.index_word[predicted_id] == '<end>':
             #     return ids, result, attention_plot
 
-            dec_input = tf.expand_dims([predicted_id], 0)
+            dec_input = tf.expand_dims(predicted_id, 1)
 
         sig_def = const.DEFAULT_SERVING_SIGNATURE_DEF_KEY
+
+        # transpose ids into [batch_size, max_length]
+        ids = tf.transpose(ids)
+        # transpose attention into [batch_size, max_length, feature_shape]
+        attention_plot = tf.transpose(attention_plot, [1, 0, 2])
+
         predictions = {
             'predictions': ids,
             'attention': attention_plot,
@@ -275,10 +284,12 @@ class RNN_Decoder(tf.keras.Model):
         self.units = units
 
         self.embedding = tf.keras.layers.Embedding(vocab_size, embedding_dim)
-        self.gru = tf.keras.layers.GRU(self.units,
-                                       return_sequences=True,
-                                       return_state=True,
-                                       recurrent_initializer='glorot_uniform')
+        self.gru = tf.keras.layers.GRU(
+            self.units,
+            return_sequences=True,
+            return_state=True,
+            recurrent_initializer='glorot_uniform'
+        )
         self.fc1 = tf.keras.layers.Dense(self.units)
         self.fc2 = tf.keras.layers.Dense(vocab_size)
 

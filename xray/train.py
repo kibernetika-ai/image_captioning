@@ -64,13 +64,13 @@ def parse_args():
     parser.add_argument('--learning-rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--log-step-count-steps', type=int, default=5, help='Log every N step')
     parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
+    parser.add_argument('--mode', default='train', choices=['train', 'export', 'eval'], help='Mode')
+    parser.add_argument('--eval', default=False, action='store_true', help='Run evaluation during train')
+    parser.add_argument('--export', default=False, action='store_true', help='Changes mode to export')
     return parser.parse_args()
 
 
-def export(train_dir, params):
-    conf = tf.estimator.RunConfig(
-        model_dir=train_dir,
-    )
+def export(xray, train_dir, params):
     feature_placeholders = {
         'images': tf.placeholder(tf.float32, [params['batch_size'], 299, 299, 3], name='images'),
     }
@@ -78,17 +78,12 @@ def export(train_dir, params):
         feature_placeholders,
         default_batch_size=params['batch_size']
     )
-    xray = model.Model(
-        params=params,
-        model_dir=train_dir,
-        config=conf,
-    )
     export_path = xray.export_savedmodel(
         train_dir,
         receiver,
     )
     export_path = export_path.decode("utf-8")
-    log.info('Exported to %s' % export_path)
+    log.info('Exported to %s.' % export_path)
 
 
 def main():
@@ -128,9 +123,28 @@ def main():
         model_dir=args.train_dir,
         config=conf,
     )
+    mode = args.mode
+    if args.export:
+        mode = 'export'
 
-    input_fn = model.input_fn(params, True)
-    xray.train(input_fn=input_fn, steps=args.steps)
+    if mode == 'train':
+        input_fn = model.input_fn(params, True)
+
+        if args.eval:
+            eval_input_fn = model.input_fn(params, False)
+            train_spec = tf.estimator.TrainSpec(input_fn=input_fn, max_steps=args.steps)
+            eval_spec = tf.estimator.EvalSpec(
+                input_fn=eval_input_fn, steps=1, start_delay_secs=10, throttle_secs=10
+            )
+            tf.estimator.train_and_evaluate(xray, train_spec, eval_spec)
+        else:
+            xray.train(input_fn=input_fn, steps=args.steps)
+    elif mode == 'eval':
+        eval_input_fn = model.input_fn(params, False)
+        xray.evaluate(eval_input_fn, steps=1)
+    elif mode == 'export':
+        # export
+        export(xray, args.train_dir, params)
 
 
 if __name__ == '__main__':
