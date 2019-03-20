@@ -1,6 +1,8 @@
 from __future__ import absolute_import, division, print_function
 
 import argparse
+import os
+import shutil
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -84,6 +86,11 @@ def export(xray, train_dir, params):
     )
     export_path = export_path.decode("utf-8")
     log.info('Exported to %s.' % export_path)
+
+    shutil.copy(
+        os.path.join(params['data_dir'], 'label_map.json'),
+        os.path.join(export_path, 'label_map.json'),
+    )
 
 
 def main():

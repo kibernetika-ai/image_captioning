@@ -37,12 +37,18 @@ def tokenize(word_index, text):
     return tokens
 
 
-def get_word_index(params):
-    word_index = {}
-    max_index = 0
+def load_label_map(params):
     path = os.path.join(params['data_dir'], 'label_map.json')
     with open(path) as f:
         label_map = json.load(f)
+
+    return label_map
+
+
+def get_word_index(params):
+    word_index = {}
+    max_index = 0
+    label_map = load_label_map(params)
 
     shift = 1
     for i, k in enumerate(sorted(label_map)):
