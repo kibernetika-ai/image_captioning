@@ -1,12 +1,17 @@
 import base64
+import collections
+import datetime
 import io
 import json
 import logging
 import time
 
+import cv2
 from ml_serving.drivers import driver
+from ml_serving.utils import helpers
 import numpy as np
 from PIL import Image
+import srt
 
 import label_map_util
 import serving_hook
@@ -31,6 +36,14 @@ PARAMS = {
     # /opt/intel/computer_vision_sdk/deployment_tools/intel_models/emotions-recognition-retail-0003/FP32/emotions-recognition-retail-0003.xml
     'emotion_model': '',
     'draw_caption': False,
+
+    'detect_faces': True,
+    'detect_objects': True,
+    'build_caption': True,
+    'detect_poses': True,
+    'generate_srt': False,
+    'objects_srt_file': 'objects.srt',
+    'captions_srt_file': 'captions.srt',
 }
 session = None
 caption_generator = None
@@ -39,11 +52,18 @@ category_index = None
 pose_index = None
 face_serving = None
 emotion_serving = None
+object_srt = []
+caption_srt = []
 
 
 def init_hook(**params):
     global PARAMS
     PARAMS.update(params)
+
+    PARAMS['detect_faces'] = helpers.boolean_string(PARAMS['detect_faces'])
+    PARAMS['detect_objects'] = helpers.boolean_string(PARAMS['detect_objects'])
+    PARAMS['build_caption'] = helpers.boolean_string(PARAMS['build_caption'])
+    PARAMS['detect_poses'] = helpers.boolean_string(PARAMS['detect_poses'])
 
     remote_serving = PARAMS['remote_serving_addr']
     if remote_serving:
@@ -178,7 +198,7 @@ def set_detection_params(inputs, ctx):
             value = raw_value[0]
         else:
             # True by default
-            value = True
+            value = PARAMS.get(param, True)
 
         setattr(ctx, param, value)
 
@@ -220,9 +240,7 @@ def rotate_by_exif(image, ctx=None):
 def preprocess_detection(inputs, ctx, **kwargs):
     t = time.time()
 
-    image = inputs.get('input')
-    if image is None:
-        raise RuntimeError('Missing "input" key in inputs. Provide an image in "input" key')
+    np_image, is_video = helpers.load_image(inputs, 'input')
 
     set_detection_params(inputs, ctx)
     output_type = inputs.get('output_type')
@@ -234,23 +252,24 @@ def preprocess_detection(inputs, ctx, **kwargs):
     else:
         ctx.output_type = PARAMS['output_type']
 
-    ctx.raw_image = image[0]
-    image = Image.open(io.BytesIO(image[0]))
+    image = Image.fromarray(np_image)
+    ctx.raw_image = cv2.imencode('.jpg', np_image)[1].tostring()
 
     # Rotate if exif tags specified
-    image = rotate_by_exif(image, ctx)
+    # image = rotate_by_exif(image, ctx)
 
-    image = image.convert('RGB')
+    # image = image.convert('RGB')
     ctx.image = image
+    ctx.is_video = is_video
     if serving_hook.caption_type == serving_hook.IMAGE_CAPTIONING:
         preprocessed = serving_hook.load_image(image)
         ctx.caption_image = np.array(preprocessed, np.float32)
 
-    ctx.np_image = np.array(image)
+    ctx.np_image = np_image
 
     data = image.resize((300, 300), Image.ANTIALIAS)
     ctx.pose_image = np.array(data)
-    data = np.array(data).transpose([2, 0, 1]).reshape(1, 3, 300, 300)
+    data = np.array(data).transpose([2, 0, 1]).reshape([1, 3, 300, 300])
     # convert to BGR
     data = data[:, ::-1, :, :]
     ctx.face_image = data
@@ -524,7 +543,7 @@ def result_table_string(result_dict, ctx):
     return json.dumps(table)
 
 
-def postprocess_poses(outputs, ctx):
+def postprocess_poses(outputs, ctx, **kwargs):
     result = ctx.result
     LOG.info('pose-detection: %.3fms' % ((time.time() - ctx.t) * 1000))
 
@@ -533,12 +552,79 @@ def postprocess_poses(outputs, ctx):
         pose_out = get_pose_output(pose_out, ctx)
         result.update(pose_out)
 
+    if ctx.is_video and PARAMS['generate_srt']:
+        generate_srt(ctx, result, **kwargs)
+
     if ctx.output_type == 'image':
         return image_output(ctx, result, PARAMS)
 
     result['table_output'] = result_table_string(result, ctx)
     result['caption_output'] = result.get('captions', [])
     return result
+
+
+def generate_srt(ctx, result, **kwargs):
+    # Generate srt file for video.
+    fps = kwargs['metadata']['output_fps']
+    frame = kwargs['metadata']['frame_num']
+    current_time = float(frame) / fps
+    step = datetime.timedelta(milliseconds=1. / fps * 1000)
+    duration = kwargs['metadata']['duration']
+
+    global object_srt
+    global caption_srt
+
+    object_classes = collections.Counter(result['detection_classes'])
+    classes_string = ', '.join([f'{name}: {count}' for name, count in object_classes.items()])
+    if not object_srt:
+        start = datetime.timedelta(milliseconds=0)
+        end = start + step
+        sub = srt.Subtitle(
+            index=len(object_srt) + 1,
+            start=start,
+            end=end,
+            content=classes_string
+        )
+    else:
+        start = object_srt[-1].end
+        end = start + step
+        sub = srt.Subtitle(
+            index=len(object_srt) + 1,
+            start=start,
+            end=end,
+            content=classes_string
+        )
+    object_srt.append(sub)
+
+    if ctx.build_caption:
+        captions = result['captions']
+        if len(captions) > 0:
+            caption = captions[0]
+            if not object_srt:
+                start = datetime.timedelta(milliseconds=0)
+                end = start + step
+                sub = srt.Subtitle(
+                    index=len(object_srt) + 1,
+                    start=start,
+                    end=end,
+                    content=caption
+                )
+            else:
+                start = object_srt[-1].end
+                end = start + step
+                sub = srt.Subtitle(
+                    index=len(object_srt) + 1,
+                    start=start,
+                    end=end,
+                    content=caption
+                )
+            caption_srt.append(sub)
+
+    if current_time + 2 >= duration:
+        with open(PARAMS['objects_srt_file'], 'w') as sw:
+            sw.write(srt.compose(object_srt))
+        with open(PARAMS['captions_srt_file'], 'w') as sw:
+            sw.write(srt.compose(caption_srt))
 
 
 def image_output(ctx, result, params):
