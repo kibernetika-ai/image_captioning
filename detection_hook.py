@@ -578,47 +578,41 @@ def generate_srt(ctx, result, **kwargs):
     classes_string = ', '.join([f'{name}: {count}' for name, count in object_classes.items()])
     if not object_srt:
         start = datetime.timedelta(milliseconds=0)
-        end = start + step
-        sub = srt.Subtitle(
-            index=len(object_srt) + 1,
-            start=start,
-            end=end,
-            content=classes_string
-        )
     else:
-        start = object_srt[-1].end
-        end = start + step
-        sub = srt.Subtitle(
-            index=len(object_srt) + 1,
-            start=start,
-            end=end,
-            content=classes_string
-        )
-    object_srt.append(sub)
+        start = datetime.timedelta(seconds=current_time) - step
+
+    end = start + step
+    sub = srt.Subtitle(
+        index=len(object_srt) + 1,
+        start=start,
+        end=end,
+        content=classes_string
+    )
+    if object_srt and object_srt[-1].content == classes_string:
+        object_srt[-1].end = end
+    elif not object_srt or object_srt[-1].content != classes_string:
+        object_srt.append(sub)
 
     if ctx.build_caption:
         captions = result['captions']
         if len(captions) > 0:
             caption = captions[0]
-            if not object_srt:
+            if not caption_srt:
                 start = datetime.timedelta(milliseconds=0)
-                end = start + step
-                sub = srt.Subtitle(
-                    index=len(object_srt) + 1,
-                    start=start,
-                    end=end,
-                    content=caption
-                )
             else:
-                start = object_srt[-1].end
-                end = start + step
-                sub = srt.Subtitle(
-                    index=len(object_srt) + 1,
-                    start=start,
-                    end=end,
-                    content=caption
-                )
-            caption_srt.append(sub)
+                start = datetime.timedelta(seconds=current_time) - step
+
+            end = start + step
+            sub = srt.Subtitle(
+                index=len(caption_srt) + 1,
+                start=start,
+                end=end,
+                content=caption
+            )
+            if caption_srt and caption_srt[-1].content == caption:
+                caption_srt[-1].end = end
+            elif not caption_srt or caption_srt[-1].content != caption:
+                caption_srt.append(sub)
 
     if current_time + 2 >= duration:
         with open(PARAMS['objects_srt_file'], 'w') as sw:
