@@ -686,7 +686,7 @@ def image_output(ctx, result, params):
     LOG.info('render-image: %.3fms' % ((time.time() - t) * 1000))
 
     return {
-        'output': image_bytes.getvalue(),
+        'output': base64.encodebytes(image_bytes.getvalue()).decode(),
         'table_output': table_string,
         'caption_output': result.get('captions', [])
     }
