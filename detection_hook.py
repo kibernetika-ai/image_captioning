@@ -192,7 +192,7 @@ def set_detection_params(inputs, ctx):
         'detect_poses',
     ]
     for param in detection_params:
-        raw_value = inputs.get(param)
+        raw_value = helpers.get_param(inputs, param)
         if raw_value is not None:
             LOG.info('%s=%s', param, raw_value)
             value = raw_value[0]
