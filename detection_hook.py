@@ -478,7 +478,7 @@ def image_resize(image, width=None, height=None, inter=Image.ANTIALIAS):
     return resized
 
 
-def result_table_string(result_dict, ctx):
+def result_table_string(result_dict, ctx, as_json: bool = False):
     table = []
 
     def crop_from_box(box, normalized_coordinates=True):
@@ -540,7 +540,10 @@ def result_table_string(result_dict, ctx):
         for i, box in enumerate(result_dict['face_boxes']):
             append('emotion', emotion_max[i], max(emotion_prob[i]), crop_from_box(box))
 
-    return json.dumps(table)
+    if as_json:
+        return json.dumps(table)
+
+    return table
 
 
 def postprocess_poses(outputs, ctx, **kwargs):
